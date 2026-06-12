@@ -1,13 +1,13 @@
 use std::path::Path;
 
 use anyhow::Result;
-use serde_json::{Value, json};
-use toml_edit::{DocumentMut, Item, Table, value};
+use serde_json::{json, Value};
+use toml_edit::{value, DocumentMut, Item, Table};
 
 use crate::{
-    Error,
     fs::{read_text, write_if_changed},
     tool::MergeFormat,
+    Error,
 };
 
 const CODEX_START: &str = "# >>> agent-switch:mcp >>>";
@@ -187,4 +187,72 @@ pub fn canonical_mcp_path(root: &Path, agents_dir: &Path) -> std::path::PathBuf 
 /// configured.
 pub fn empty_mcp() -> &'static str {
     EMPTY_MCP
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn block() -> &'static str {
+        "# >>> agent-switch:mcp >>>\n[mcp_servers.demo]\ncommand = \"npx\"\n# <<< agent-switch:mcp <<<\n"
+    }
+
+    #[test]
+    fn marker_block_replaces_current_markers() {
+        let existing = "theme = \"dark\"\n\n# >>> agent-switch:mcp >>>\nold = true\n# <<< agent-switch:mcp <<<\n";
+        let next = replace_marker_block(existing, block());
+
+        assert!(next.contains("theme = \"dark\""));
+        assert!(next.contains("[mcp_servers.demo]"));
+        assert!(!next.contains("old = true"));
+        assert!(next.ends_with('\n'));
+    }
+
+    #[test]
+    fn marker_block_replaces_legacy_markers() {
+        let existing = "# >>> agentstitch:mcp >>>\nold = true\n# <<< agentstitch:mcp <<<\n";
+        let next = replace_marker_block(existing, block());
+
+        assert!(next.contains(CODEX_START));
+        assert!(next.contains("[mcp_servers.demo]"));
+        assert!(!next.contains(LEGACY_CODEX_START));
+        assert!(!next.contains("old = true"));
+    }
+
+    #[test]
+    fn marker_block_handles_missing_end_marker() {
+        let existing = "theme = \"dark\"\n\n# >>> agent-switch:mcp >>>\nold = true\n";
+        let next = replace_marker_block(existing, block());
+
+        assert_eq!(
+            next,
+            "theme = \"dark\"\n\n# >>> agent-switch:mcp >>>\n[mcp_servers.demo]\ncommand = \"npx\"\n# <<< agent-switch:mcp <<<\n"
+        );
+    }
+
+    #[test]
+    fn marker_block_uses_block_for_empty_file() {
+        assert_eq!(replace_marker_block("\n\n", block()), block());
+    }
+
+    #[test]
+    fn codex_mcp_block_renders_command_args_and_env() {
+        let canonical = json!({
+            "mcpServers": {
+                "context7": {
+                    "command": "npx",
+                    "args": ["-y", "@upstash/context7-mcp"],
+                    "env": {"KEY": "${KEY}"}
+                }
+            }
+        });
+
+        let rendered = render_codex_mcp_block(&canonical);
+
+        assert!(rendered.contains("mcp_servers"));
+        assert!(rendered.contains("context7"));
+        assert!(rendered.contains("command = \"npx\""));
+        assert!(rendered.contains("args = [\"-y\", \"@upstash/context7-mcp\"]"));
+        assert!(rendered.contains("env = { KEY = \"${KEY}\" }"));
+    }
 }

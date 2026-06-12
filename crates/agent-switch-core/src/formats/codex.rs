@@ -1,6 +1,6 @@
 use anyhow::Result;
-use serde_yml::{Mapping, Value};
-use toml_edit::{DocumentMut, Item, Table, value};
+use noyalib::{Mapping, Value};
+use toml_edit::{value, DocumentMut, Item, Table};
 
 use super::markdown::{self, render, set_string};
 
@@ -13,7 +13,6 @@ pub fn export_agent(source: &str) -> Result<String> {
     if let Some(description) = markdown::str_value(&doc.frontmatter, "description") {
         out["description"] = value(description);
     }
-    // In serde_yml, iterating Mapping yields (String, Value) — key is already String.
     for (key, val) in markdown::mapping_value(&doc.frontmatter, "codex") {
         out[key.as_str()] = yaml_to_toml(val);
     }
@@ -123,7 +122,7 @@ fn toml_to_yaml(item: &Item) -> Value {
 fn value_to_string(value: Value) -> String {
     match value {
         Value::String(s) => s,
-        other => serde_yml::to_string(&other)
+        other => noyalib::to_string(&other)
             .unwrap_or_default()
             .trim()
             .to_string(),

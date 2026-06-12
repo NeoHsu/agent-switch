@@ -1,12 +1,12 @@
 use std::{fs, path::Path};
 
 use agent_switch_core::{
-    ExitCode,
-    config::{self, Config},
+    config::{self, Config, SymlinkDetail, SymlinkSpec},
     init,
     manifest::{self, Manifest},
     setup::{self, SetupOptions},
     tool::Tool,
+    ExitCode,
 };
 use tempfile::tempdir;
 
@@ -37,11 +37,40 @@ fn init_writes_agent_switch_config() {
 
     assert!(root.join(".agent-switch.yaml").exists());
     assert!(!root.join(".agentstitch.yaml").exists());
-    assert!(
-        out.lines
-            .iter()
-            .any(|line| line == "created  .agent-switch.yaml")
+    assert!(out
+        .lines
+        .iter()
+        .any(|line| line == "created  .agent-switch.yaml"));
+}
+
+#[test]
+fn config_loads_detailed_symlink_specs() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+    write(
+        &root.join(".agent-switch.yaml"),
+        r#"version: 1
+symlinks:
+  CUSTOM.md:
+    to: .agents/custom.md
+    tools: [codex]
+"#,
     );
+
+    let cfg = config::load_config(root, None).unwrap().0;
+    let spec = cfg.symlinks.get("CUSTOM.md").unwrap();
+
+    assert_eq!(spec.target(), Path::new(".agents/custom.md"));
+    assert!(config::symlink_selected(
+        "CUSTOM.md",
+        spec,
+        Some(&[Tool::Codex])
+    ));
+    assert!(!config::symlink_selected(
+        "CUSTOM.md",
+        spec,
+        Some(&[Tool::Claude])
+    ));
 }
 
 #[test]
@@ -76,16 +105,96 @@ fn setup_prune_removes_links_for_unselected_tools() {
     )
     .unwrap();
 
-    assert!(
-        out.lines
-            .iter()
-            .any(|line| line == "removed: .copilot/mcp-config.json")
-    );
+    assert!(out
+        .lines
+        .iter()
+        .any(|line| line == "removed: .copilot/mcp-config.json"));
     assert!(out.lines.iter().any(|line| line == "removed: .pi/mcp.json"));
     assert!(!root.join(".copilot/mcp-config.json").exists());
     assert!(!root.join(".pi/mcp.json").exists());
     assert!(root.join(".claude/skills").is_symlink());
     assert!(root.join(".mcp.json").is_symlink());
+}
+
+#[test]
+fn setup_prune_keeps_custom_links_without_tool_ownership() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+    let mut cfg = fixture(root);
+    write(&root.join(".agents/custom.md"), "custom\n");
+    cfg.symlinks.insert(
+        "CUSTOM.md".into(),
+        SymlinkSpec::Target(".agents/custom.md".into()),
+    );
+
+    setup::run(
+        root,
+        &cfg,
+        None,
+        SetupOptions {
+            no_sync: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert!(root.join("CUSTOM.md").is_symlink());
+
+    setup::run(
+        root,
+        &cfg,
+        Some(&[Tool::Claude]),
+        SetupOptions {
+            no_sync: true,
+            prune: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert!(root.join("CUSTOM.md").is_symlink());
+}
+
+#[test]
+fn setup_prune_honors_custom_link_tool_ownership() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+    let mut cfg = fixture(root);
+    write(&root.join(".agents/custom.md"), "custom\n");
+    cfg.symlinks.insert(
+        "CUSTOM.md".into(),
+        SymlinkSpec::Detailed(SymlinkDetail {
+            to: ".agents/custom.md".into(),
+            tool: None,
+            tools: Some(vec![Tool::Codex]),
+        }),
+    );
+
+    setup::run(
+        root,
+        &cfg,
+        None,
+        SetupOptions {
+            no_sync: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert!(root.join("CUSTOM.md").is_symlink());
+
+    let out = setup::run(
+        root,
+        &cfg,
+        Some(&[Tool::Claude]),
+        SetupOptions {
+            no_sync: true,
+            prune: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert!(out.lines.iter().any(|line| line == "removed: CUSTOM.md"));
+    assert!(!root.join("CUSTOM.md").exists());
 }
 
 #[test]
@@ -142,11 +251,10 @@ fn setup_prune_removes_manifest_tracked_copy_fallback() {
     )
     .unwrap();
 
-    assert!(
-        out.lines
-            .iter()
-            .any(|line| line == "removed: .copilot/mcp-config.json")
-    );
+    assert!(out
+        .lines
+        .iter()
+        .any(|line| line == "removed: .copilot/mcp-config.json"));
     assert!(!root.join(".copilot/mcp-config.json").exists());
     let next_manifest = manifest::load(&root.join(".agents/.sync-manifest.json")).unwrap();
     assert!(!next_manifest.links.contains_key(".copilot/mcp-config.json"));

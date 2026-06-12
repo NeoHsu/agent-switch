@@ -9,9 +9,9 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Error,
     fs::read_text,
     tool::{self, Format, MergeFormat, Tool},
+    Error,
 };
 
 pub const CONFIG_FILE: &str = ".agent-switch.yaml";
@@ -25,7 +25,7 @@ pub struct Config {
     #[serde(default = "default_manifest")]
     pub manifest: PathBuf,
     #[serde(default)]
-    pub symlinks: BTreeMap<String, String>,
+    pub symlinks: BTreeMap<String, SymlinkSpec>,
     #[serde(default)]
     pub generate: BTreeMap<String, GenerateSpec>,
     #[serde(default)]
@@ -50,6 +50,44 @@ pub struct GenerateSpec {
 impl GenerateSpec {
     pub fn effective_tools(&self) -> Vec<Tool> {
         explicit_tools(self.tool, self.tools.as_deref()).unwrap_or_else(|| vec![self.format.tool()])
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum SymlinkSpec {
+    Target(PathBuf),
+    Detailed(SymlinkDetail),
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SymlinkDetail {
+    #[serde(alias = "target")]
+    pub to: PathBuf,
+    #[serde(default)]
+    pub tool: Option<Tool>,
+    #[serde(default)]
+    pub tools: Option<Vec<Tool>>,
+}
+
+impl SymlinkSpec {
+    pub fn target(&self) -> &Path {
+        match self {
+            Self::Target(target) => target,
+            Self::Detailed(detail) => &detail.to,
+        }
+    }
+
+    pub fn target_config(&self) -> String {
+        self.target().to_string_lossy().replace('\\', "/")
+    }
+
+    pub fn effective_tools(&self, link: &str) -> Vec<Tool> {
+        let explicit = match self {
+            Self::Target(_) => None,
+            Self::Detailed(detail) => explicit_tools(detail.tool, detail.tools.as_deref()),
+        };
+        explicit.unwrap_or_else(|| tool::tools_for_link(link, &self.target_config()).to_vec())
     }
 }
 
@@ -174,7 +212,7 @@ impl Default for Config {
     fn default() -> Self {
         let symlinks = DEFAULT_SYMLINKS
             .iter()
-            .map(|(link, target)| (link.to_string(), target.to_string()))
+            .map(|(link, target)| (link.to_string(), SymlinkSpec::Target((*target).into())))
             .collect();
         let generate = DEFAULT_GENERATE
             .iter()
@@ -235,7 +273,7 @@ pub fn load_config(root: &Path, explicit: Option<&Path>) -> Result<(Config, Path
     };
     let content = read_text(&path)
         .map_err(|err| Error::Config(format!("failed to read config {}: {err}", path.display())))?;
-    let cfg: Config = serde_yml::from_str(&content)
+    let cfg: Config = noyalib::from_str(&content)
         .map_err(|err| Error::Config(format!("invalid config {}: {err}", path.display())))?;
     validate_config(&cfg)?;
     Ok((cfg, path))
@@ -248,7 +286,7 @@ pub fn write_default_config(path: &Path, force: bool) -> Result<bool> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let text = serde_yml::to_string(&Config::default())?;
+    let text = noyalib::to_string(&Config::default())?;
     fs::write(path, text)?;
     Ok(true)
 }
@@ -310,8 +348,12 @@ pub fn merge_selected(id: &str, spec: &MergeSpec, filter: Option<&[Tool]>) -> bo
     selected(&spec.effective_tools(id), filter)
 }
 
-pub fn symlink_selected(link: &str, target: &str, filter: Option<&[Tool]>) -> bool {
-    selected(tool::tools_for_link(link, target), filter)
+pub fn symlink_selected(link: &str, spec: &SymlinkSpec, filter: Option<&[Tool]>) -> bool {
+    let tools = spec.effective_tools(link);
+    if tools.is_empty() {
+        return true;
+    }
+    selected(&tools, filter)
 }
 
 fn selected(mapping_tools: &[Tool], filter: Option<&[Tool]>) -> bool {

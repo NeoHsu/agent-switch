@@ -17,10 +17,10 @@ name = "agent-switch-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "noyalib",
  "pathdiff",
  "serde",
  "serde_json",
- "serde_yml",
  "sha2",
  "strum",
  "tempfile",
@@ -315,9 +315,9 @@ checksum = "88904434abc2901f197fe8cc55f0445e7ded921dba5911dad2e2b39b48e663c4"
 
 [[package]]
 name = "noyalib"
-version = "0.0.5"
+version = "0.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e493c05128df7a83b9676b709d590e0ebc285c7ed3152bc679668e8c1e506af5"
+checksum = "aaecb583890b00deddd413f1c9522cc3537e893cd3845dec578ed6c85de653f7"
 dependencies = [
  "indexmap",
  "memchr",
@@ -462,16 +462,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6662b5879511e06e8999a8a235d848113e942c9124f211511b16466ee2995f26"
 dependencies = [
  "serde_core",
-]
-
-[[package]]
-name = "serde_yml"
-version = "0.0.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "909764a65f86829ccdb5eea9ab355843aa02c019a7bfd47465092953565caa05"
-dependencies = [
- "noyalib",
- "serde",
 ]
 
 [[package]]

@@ -4,11 +4,11 @@ use anyhow::Result;
 use serde_json::json;
 
 use crate::{
-    CommandOutput, ExitCode,
-    config::{self, CONFIG_FILE, Config, LEGACY_CONFIG_FILE},
+    config::{self, Config, CONFIG_FILE, LEGACY_CONFIG_FILE},
     fs::{abs, repo_path},
     manifest,
     sync::{self, SyncOptions},
+    CommandOutput, ExitCode,
 };
 
 pub fn doctor(root: &Path, cfg: Option<&Config>, json_output: bool) -> Result<CommandOutput> {
@@ -26,7 +26,7 @@ pub fn doctor(root: &Path, cfg: Option<&Config>, json_output: bool) -> Result<Co
 
     if json_output {
         out.push(serde_json::to_string_pretty(&json!({
-            "root": repo_path(root),
+            "root": root.display().to_string(),
             "agents_dir": agents_exists,
             "config": config_exists,
             "manifest": manifest_ok,
@@ -51,10 +51,10 @@ pub fn doctor(root: &Path, cfg: Option<&Config>, json_output: bool) -> Result<Co
         out.push("warning: manifest is not parseable");
     }
     if let Some(cfg) = cfg {
-        for (link, target) in &cfg.symlinks {
+        for (link, spec) in &cfg.symlinks {
             let link_abs = abs(root, Path::new(link));
             if link_abs.is_symlink() || link_abs.exists() {
-                out.push(format!("ok       {} -> {}", link, target));
+                out.push(format!("ok       {} -> {}", link, repo_path(spec.target())));
             } else {
                 out.push(format!("warning: {} is missing", link));
             }

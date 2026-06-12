@@ -1,7 +1,7 @@
 use std::{borrow::Cow, collections::BTreeMap};
 
 use anyhow::Result;
-use serde_yml::{Mapping, Value};
+use noyalib::{Mapping, Value};
 
 #[derive(Debug, Clone)]
 pub struct MarkdownDoc {
@@ -32,7 +32,7 @@ pub fn parse(input: &str) -> Result<MarkdownDoc> {
     let frontmatter = if yaml.trim().is_empty() {
         Mapping::new()
     } else {
-        serde_yml::from_str::<Mapping>(yaml)?
+        noyalib::from_str::<Mapping>(yaml)?
     };
     Ok(MarkdownDoc {
         frontmatter,
@@ -68,9 +68,8 @@ pub fn render(frontmatter: Mapping, body: &str) -> Result<String> {
     if frontmatter.is_empty() {
         return Ok(body.to_string());
     }
-    let mut yaml = serde_yml::to_string(&frontmatter)?;
-    // serde_yml does not always append a trailing newline; ensure one is present
-    // so the closing `---` fence appears on its own line.
+    let mut yaml = noyalib::to_string(&frontmatter)?;
+    // Ensure the closing `---` fence appears on its own line.
     if !yaml.ends_with('\n') {
         yaml.push('\n');
     }
@@ -80,8 +79,6 @@ pub fn render(frontmatter: Mapping, body: &str) -> Result<String> {
         body.trim_start_matches('\n')
     ))
 }
-
-// In serde_yml, Mapping keys are String (not Value), so all lookups use &str.
 
 pub fn str_value(map: &Mapping, key: &str) -> Option<String> {
     map.get(key).and_then(Value::as_str).map(ToOwned::to_owned)

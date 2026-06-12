@@ -6,8 +6,8 @@ use crate::{
     manifest,
 };
 
-use crate::sync::SyncOptions;
 use crate::sync::stage::SyncStage;
+use crate::sync::SyncOptions;
 use crate::sync::{context::SyncContext, plan::SyncPlan, report::SyncReport};
 
 use super::super::event::SyncEvent;
@@ -37,12 +37,13 @@ fn sync_link_copies(
     report: &mut SyncReport,
 ) -> Result<bool> {
     let mut changed = false;
-    for (link, target) in &ctx.cfg.symlinks {
-        if !config::symlink_selected(link, target, ctx.tools) {
+    for (link, spec) in &ctx.cfg.symlinks {
+        if !config::symlink_selected(link, spec, ctx.tools) {
             continue;
         }
         let link_rel = std::path::Path::new(link);
-        let target_rel = std::path::Path::new(target);
+        let target_rel = spec.target();
+        let target_cfg = spec.target_config();
         let link_abs = ctx.abs(link_rel);
         let target_abs = ctx.abs(target_rel);
 
@@ -51,7 +52,7 @@ fn sync_link_copies(
         }
 
         let rel_target = relative_link(&link_abs, &target_abs);
-        if is_fake_symlink(&link_abs, &rel_target, target) {
+        if is_fake_symlink(&link_abs, &rel_target, &target_cfg) {
             report.push(SyncEvent::Warning {
                 message: format!(
                     "{} is an unrestored git symlink placeholder; run `ags setup`",

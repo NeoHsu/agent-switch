@@ -42,7 +42,10 @@ impl SyncPlan {
     }
 
     pub(super) fn spec_for_dest(&self, dest: &Path) -> Option<&GenerateSpec> {
-        self.specs.iter().find(|spec| dest.starts_with(&spec.to))
+        self.specs
+            .iter()
+            .filter(|spec| dest.starts_with(&spec.to))
+            .max_by_key(|spec| spec.to.components().count())
     }
 }
 

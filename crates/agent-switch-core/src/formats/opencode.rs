@@ -2,7 +2,9 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use super::markdown::{self, base_with_namespace, canonical_with_tool_ns, render, set_string};
+use super::markdown::{
+    self, base_with_namespace, canonical_with_tool_ns, merge_mapping, render, set_string,
+};
 
 pub fn export_agent(source: &str) -> Result<String> {
     let doc = markdown::parse(source)?;
@@ -19,11 +21,13 @@ pub fn import_agent(path: &Path, source: &str) -> Result<String> {
         &["description"],
         &["description", "mode"],
     );
-    // In serde_yml, Mapping::contains_key takes &str directly.
     if !fm.contains_key("name")
         && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
     {
-        set_string(&mut fm, "name", stem);
+        let mut with_name = noyalib::Mapping::new();
+        set_string(&mut with_name, "name", stem);
+        merge_mapping(&mut with_name, fm);
+        fm = with_name;
     }
     render(fm, &doc.body)
 }

@@ -83,3 +83,20 @@ fn opencode_agent_export_sets_mode_and_import_restores_name() {
     assert!(imported.contains("name: reviewer"));
     assert!(!imported.contains("mode: subagent"));
 }
+
+#[test]
+fn opencode_agent_round_trips_namespace() {
+    let canonical = "---\nname: reviewer\ndescription: Reviews code.\nopencode:\n  model: anthropic/claude-sonnet-4-6\n---\nReview.\n";
+
+    let exported = formats::export(Format::OpencodeAgent, canonical).unwrap();
+    assert!(exported.contains("mode: subagent"));
+    assert!(exported.contains("model: anthropic/claude-sonnet-4-6"));
+
+    let imported = formats::import(
+        Format::OpencodeAgent,
+        Path::new(".opencode/agents/reviewer.md"),
+        &exported,
+    )
+    .unwrap();
+    assert_eq!(imported, canonical);
+}

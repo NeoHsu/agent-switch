@@ -50,7 +50,6 @@ pub fn import_instructions(source: &str) -> Result<String> {
         &["description"],
         &["description", "applyTo"],
     );
-    // In serde_yml, Mapping::get takes &str directly.
     let apply_to = doc
         .frontmatter
         .get("applyTo")

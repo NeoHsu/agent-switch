@@ -6,11 +6,11 @@ use std::{
 use anyhow::Result;
 
 use crate::{
-    CommandOutput, ExitCode,
     config::{self, Config},
     fs::{abs, is_fake_symlink, relative_link, remove_file_or_empty_dir, repo_path},
     manifest, sync,
     tool::Tool,
+    CommandOutput, ExitCode,
 };
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -32,12 +32,13 @@ pub fn run(
     if opts.prune {
         drift |= prune_unselected(root, cfg, tools, opts.check, &mut out)?;
     }
-    for (link, target) in &cfg.symlinks {
-        if !config::symlink_selected(link, target, tools) {
+    for (link, spec) in &cfg.symlinks {
+        if !config::symlink_selected(link, spec, tools) {
             continue;
         }
         let link_rel = Path::new(link);
-        let target_rel_cfg = Path::new(target);
+        let target_rel_cfg = spec.target();
+        let target_cfg = spec.target_config();
         let link_abs = abs(root, link_rel);
         let target_abs = abs(root, target_rel_cfg);
         let rel_target = relative_link(&link_abs, &target_abs);
@@ -52,7 +53,7 @@ pub fn run(
             continue;
         }
 
-        if is_fake_symlink(&link_abs, &rel_target, target) {
+        if is_fake_symlink(&link_abs, &rel_target, &target_cfg) {
             drift = true;
             if opts.check {
                 out.push(format!("repaired {}", repo_path(link_rel)));
@@ -144,12 +145,13 @@ fn prune_unselected(
     let mut changed = false;
     let mut manifest_changed = false;
 
-    for (link, target) in &cfg.symlinks {
-        if config::symlink_selected(link, target, Some(tools)) {
+    for (link, spec) in &cfg.symlinks {
+        if config::symlink_selected(link, spec, Some(tools)) {
             continue;
         }
         let link_rel = Path::new(link);
-        let target_rel = Path::new(target);
+        let target_rel = spec.target();
+        let target_cfg = spec.target_config();
         let link_abs = abs(root, link_rel);
         let target_abs = abs(root, target_rel);
         let rel_target = relative_link(&link_abs, &target_abs);
@@ -157,7 +159,7 @@ fn prune_unselected(
         let had_manifest_link = sync_manifest.links.contains_key(&link_key);
 
         let managed = is_correct_link(&link_abs, &target_abs)?
-            || is_fake_symlink(&link_abs, &rel_target, target)
+            || is_fake_symlink(&link_abs, &rel_target, &target_cfg)
             || (had_manifest_link && link_abs.is_file());
         if managed {
             changed = true;
