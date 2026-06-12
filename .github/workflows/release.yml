@@ -18,24 +18,29 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
             asset: linux-x86_64
           - os: macos-latest
+            target: aarch64-apple-darwin
             asset: macos-aarch64
           - os: windows-latest
+            target: x86_64-pc-windows-msvc
             asset: windows-x86_64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release -p agent-switch-cli
+      - run: cargo build --release -p agent-switch-cli --target ${{ matrix.target }}
       - name: Package Unix binary
         if: runner.os != 'Windows'
-        run: tar -czf ags-${{ matrix.asset }}.tar.gz -C target/release ags
+        run: tar -czf ags-${{ matrix.asset }}.tar.gz -C target/${{ matrix.target }}/release ags
       - name: Package Windows binary
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Compress-Archive -Path target/release/ags.exe -DestinationPath ags-${{ matrix.asset }}.zip
+        run: Compress-Archive -Path target/${{ matrix.target }}/release/ags.exe -DestinationPath ags-${{ matrix.asset }}.zip
       - uses: softprops/action-gh-release@v2
         with:
           files: ags-${{ matrix.asset }}.*
