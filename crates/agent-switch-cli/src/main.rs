@@ -1,7 +1,7 @@
 use std::{env, path::PathBuf, process};
 
 use agent_switch_core::{
-    CommandOutput, Error, ExitCode, TOOL_VERSION, config, diagnostics, init, setup, sync,
+    config, diagnostics, init, setup, sync, CommandOutput, Error, ExitCode, TOOL_VERSION,
 };
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
@@ -200,7 +200,7 @@ fn version_output(json_output: bool) -> Result<CommandOutput> {
         out.push(serde_json::to_string_pretty(&serde_json::json!({
             "version": TOOL_VERSION,
             "commit": option_env!("GIT_SHA").unwrap_or("unknown"),
-            "target": env::var("TARGET").unwrap_or_else(|_| "unknown".into()),
+            "target": option_env!("TARGET").unwrap_or("unknown"),
             "build_date": option_env!("BUILD_DATE").unwrap_or("unknown"),
         }))?);
     } else {
@@ -211,7 +211,7 @@ fn version_output(json_output: bool) -> Result<CommandOutput> {
         ));
         out.push(format!(
             "target: {}",
-            env::var("TARGET").unwrap_or_else(|_| "unknown".into())
+            option_env!("TARGET").unwrap_or("unknown")
         ));
         out.push(format!(
             "build date: {}",
