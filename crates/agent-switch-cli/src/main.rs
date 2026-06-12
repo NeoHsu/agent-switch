@@ -1,7 +1,7 @@
 use std::{env, path::PathBuf, process};
 
 use agent_switch_core::{
-    config, diagnostics, init, setup, sync, CommandOutput, ExitCode, TOOL_VERSION,
+    CommandOutput, Error, ExitCode, TOOL_VERSION, config, diagnostics, init, setup, sync,
 };
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
@@ -17,16 +17,12 @@ struct Cli {
     root: Option<PathBuf>,
     #[arg(long, global = true, env = "AGENT_SWITCH_CONFIG")]
     config: Option<PathBuf>,
-    #[arg(long, global = true)]
+    /// Comma-separated list of tools to target (e.g. `claude,copilot`).
+    /// Also accepted as `--target` for backward compatibility.
+    #[arg(long, global = true, alias = "target", env = "AGENT_SWITCH_TOOLS")]
     tool: Option<String>,
-    #[arg(long, global = true, alias = "target")]
-    target: Option<String>,
-    #[arg(long, global = true)]
-    verbose: bool,
     #[arg(long, global = true)]
     quiet: bool,
-    #[arg(long, global = true)]
-    no_color: bool,
     #[command(subcommand)]
     command: Commands,
 }
@@ -65,10 +61,15 @@ struct SetupArgs {
 struct SyncArgs {
     #[arg(long)]
     check: bool,
-    #[arg(long)]
+    #[arg(long, conflicts_with = "export_only")]
     import_only: bool,
-    #[arg(long)]
+    #[arg(long, conflicts_with = "import_only")]
     export_only: bool,
+    #[arg(long)]
+    json: bool,
+    /// Comma-separated event types to include in sync output (e.g. `generated,merged`).
+    #[arg(long, value_delimiter = ',')]
+    event_filter: Vec<String>,
 }
 
 #[derive(Debug, Args)]
@@ -110,23 +111,33 @@ fn main() {
             process::exit(out.exit().code());
         }
         Err(err) => {
-            eprintln!("{err:#}");
+            eprintln!("error: {err:#}");
             process::exit(classify_error(&err).code());
         }
     }
 }
 
 fn run(cli: Cli) -> Result<CommandOutput> {
-    let _ = (cli.verbose, cli.no_color);
-    let root = config::find_root(cli.root.as_deref())?;
+    // AGENTSTITCH_* are legacy env var names kept for backward compatibility with
+    // the previous project name; AGENT_SWITCH_* variants are handled by clap.
+    let root_arg = cli
+        .root
+        .or_else(|| env::var_os("AGENTSTITCH_ROOT").map(PathBuf::from));
+    let root = config::find_root(root_arg.as_deref())?;
     let config_path = cli
         .config
         .or_else(|| env::var_os("AGENTSTITCH_CONFIG").map(PathBuf::from));
-    let tools = config::parse_tools(cli.tool.as_deref(), cli.target.as_deref())?;
+    let raw_tools = cli.tool.or_else(|| env::var("AGENTSTITCH_TOOLS").ok());
+    let tools = raw_tools.as_deref().map(config::parse_tools).transpose()?;
     let tools_ref = tools.as_deref();
 
     let mut out = match cli.command {
-        Commands::Init(args) => init::run(&root, args.tools.as_deref(), args.force)?,
+        Commands::Init(args) => {
+            if let Some(raw) = args.tools.as_deref() {
+                config::parse_tools(raw)?;
+            }
+            init::run(&root, args.tools.as_deref(), args.force)?
+        }
         Commands::Setup(args) => {
             let (cfg, _) = config::load_config(&root, config_path.as_deref())?;
             setup::run(
@@ -143,6 +154,12 @@ fn run(cli: Cli) -> Result<CommandOutput> {
         }
         Commands::Sync(args) => {
             let (cfg, _) = config::load_config(&root, config_path.as_deref())?;
+            let event_filter = if args.event_filter.is_empty() {
+                None
+            } else {
+                Some(sync::parse_event_filter(&args.event_filter)?)
+            };
+
             sync::run(
                 &root,
                 &cfg,
@@ -151,6 +168,8 @@ fn run(cli: Cli) -> Result<CommandOutput> {
                     check: args.check,
                     import_only: args.import_only,
                     export_only: args.export_only,
+                    json: args.json,
+                    event_filter,
                 },
             )?
         }
@@ -203,16 +222,9 @@ fn version_output(json_output: bool) -> Result<CommandOutput> {
 }
 
 fn classify_error(err: &anyhow::Error) -> ExitCode {
-    let text = format!("{err:#}");
-    if text.contains("unsupported") {
-        ExitCode::Unsupported
-    } else if text.contains("config")
-        || text.contains("schema")
-        || text.contains("unknown tool")
-        || text.contains("--tool")
-    {
-        ExitCode::Config
-    } else {
-        ExitCode::Io
+    match err.downcast_ref::<Error>() {
+        Some(Error::Config(_)) => ExitCode::Config,
+        Some(Error::Unsupported(_)) => ExitCode::Unsupported,
+        None => ExitCode::Io,
     }
 }

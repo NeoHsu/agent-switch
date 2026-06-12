@@ -1,5 +1,5 @@
 use std::{
-    fs,
+    fs, io,
     path::{Path, PathBuf},
 };
 
@@ -19,6 +19,18 @@ pub fn abs(root: &Path, path: &Path) -> PathBuf {
     } else {
         root.join(path)
     }
+}
+
+/// Read a file as UTF-8 text, stripping a leading UTF-8 BOM if present.
+/// Windows editors sometimes write BOM-prefixed files that would otherwise
+/// cause YAML/TOML/JSON parsers to fail.
+pub fn read_text(path: &Path) -> io::Result<String> {
+    let s = fs::read_to_string(path)?;
+    Ok(if s.starts_with('\u{FEFF}') {
+        s['\u{FEFF}'.len_utf8()..].to_string()
+    } else {
+        s
+    })
 }
 
 pub fn write_if_changed(path: &Path, content: &str) -> Result<bool> {
@@ -45,6 +57,11 @@ pub fn is_fake_symlink(path: &Path, target_rel: &Path, target_cfg: &str) -> bool
         return false;
     };
     let trimmed = text.trim();
+    // A git-restored symlink placeholder can take three forms depending on
+    // who wrote it and which OS normalised the path:
+    //   1. the original config string (forward-slash, as in .agent-switch.yaml)
+    //   2. the normalised repo path (always forward-slash)
+    //   3. the OS-native path (backslashes on Windows)
     trimmed == target_cfg
         || trimmed == repo_path(target_rel)
         || trimmed == target_rel.to_string_lossy()

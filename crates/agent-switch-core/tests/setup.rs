@@ -1,11 +1,12 @@
 use std::{fs, path::Path};
 
 use agent_switch_core::{
+    ExitCode,
     config::{self, Config},
     init,
     manifest::{self, Manifest},
     setup::{self, SetupOptions},
-    ExitCode,
+    tool::Tool,
 };
 use tempfile::tempdir;
 
@@ -36,10 +37,11 @@ fn init_writes_agent_switch_config() {
 
     assert!(root.join(".agent-switch.yaml").exists());
     assert!(!root.join(".agentstitch.yaml").exists());
-    assert!(out
-        .lines
-        .iter()
-        .any(|line| line == "created  .agent-switch.yaml"));
+    assert!(
+        out.lines
+            .iter()
+            .any(|line| line == "created  .agent-switch.yaml")
+    );
 }
 
 #[test]
@@ -65,7 +67,7 @@ fn setup_prune_removes_links_for_unselected_tools() {
     let out = setup::run(
         root,
         &cfg,
-        Some(&["claude".into()]),
+        Some(&[Tool::Claude]),
         SetupOptions {
             no_sync: true,
             prune: true,
@@ -74,10 +76,11 @@ fn setup_prune_removes_links_for_unselected_tools() {
     )
     .unwrap();
 
-    assert!(out
-        .lines
-        .iter()
-        .any(|line| line == "removed: .copilot/mcp-config.json"));
+    assert!(
+        out.lines
+            .iter()
+            .any(|line| line == "removed: .copilot/mcp-config.json")
+    );
     assert!(out.lines.iter().any(|line| line == "removed: .pi/mcp.json"));
     assert!(!root.join(".copilot/mcp-config.json").exists());
     assert!(!root.join(".pi/mcp.json").exists());
@@ -95,7 +98,7 @@ fn setup_prune_skips_unmanaged_real_directories() {
     let out = setup::run(
         root,
         &cfg,
-        Some(&["claude".into()]),
+        Some(&[Tool::Claude]),
         SetupOptions {
             no_sync: true,
             prune: true,
@@ -104,8 +107,9 @@ fn setup_prune_skips_unmanaged_real_directories() {
     )
     .unwrap();
 
-    assert!(out.lines.iter().any(|line| line
-        .starts_with("skipped  .copilot/mcp-config.json: existing real file or directory")));
+    assert!(out.lines.iter().any(|line| {
+        line.starts_with("skipped  .copilot/mcp-config.json: existing real file or directory")
+    }));
     assert!(root.join(".copilot/mcp-config.json").is_dir());
 }
 
@@ -129,7 +133,7 @@ fn setup_prune_removes_manifest_tracked_copy_fallback() {
     let out = setup::run(
         root,
         &cfg,
-        Some(&["claude".into()]),
+        Some(&[Tool::Claude]),
         SetupOptions {
             no_sync: true,
             prune: true,
@@ -138,10 +142,11 @@ fn setup_prune_removes_manifest_tracked_copy_fallback() {
     )
     .unwrap();
 
-    assert!(out
-        .lines
-        .iter()
-        .any(|line| line == "removed: .copilot/mcp-config.json"));
+    assert!(
+        out.lines
+            .iter()
+            .any(|line| line == "removed: .copilot/mcp-config.json")
+    );
     assert!(!root.join(".copilot/mcp-config.json").exists());
     let next_manifest = manifest::load(&root.join(".agents/.sync-manifest.json")).unwrap();
     assert!(!next_manifest.links.contains_key(".copilot/mcp-config.json"));
@@ -167,7 +172,7 @@ fn setup_check_prune_reports_drift_without_removing() {
     let out = setup::run(
         root,
         &cfg,
-        Some(&["claude".into()]),
+        Some(&[Tool::Claude]),
         SetupOptions {
             no_sync: true,
             check: true,

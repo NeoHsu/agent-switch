@@ -1,11 +1,16 @@
-use std::{fs, path::Path};
+use std::{
+    collections::BTreeSet,
+    fs,
+    path::{Path, PathBuf},
+};
 
 use anyhow::Result;
 
 use crate::{
-    config::{write_default_config, CONFIG_FILE},
+    CommandOutput,
+    config::{CONFIG_FILE, Config, write_default_config},
     fs::write_if_changed,
-    mcp, CommandOutput,
+    mcp,
 };
 
 const GITIGNORE_BLOCK: &str = r#"# >>> agent-switch >>>
@@ -29,45 +34,41 @@ opencode.json
 "#;
 
 pub fn run(root: &Path, tools: Option<&str>, force: bool) -> Result<CommandOutput> {
+    let cfg = Config::default();
+    let agents_dir = root.join(&cfg.agents_dir);
     let mut out = CommandOutput::default();
-    create_dir(root, root.join(".agents/agents").as_path(), force, &mut out)?;
-    create_dir(
-        root,
-        root.join(".agents/commands").as_path(),
-        force,
-        &mut out,
-    )?;
-    create_dir(root, root.join(".agents/rules").as_path(), force, &mut out)?;
-    create_dir(
-        root,
-        root.join(".agents/skills/example-skill").as_path(),
-        force,
-        &mut out,
-    )?;
+
+    // Derive directories to create from generate spec source paths (unique,
+    // sorted), plus the example-skill directory which has no generate spec.
+    let mut dirs: BTreeSet<PathBuf> = cfg.generate.values().map(|s| root.join(&s.from)).collect();
+    dirs.insert(agents_dir.join("skills").join("example-skill"));
+    for dir in &dirs {
+        create_dir(root, dir, &mut out)?;
+    }
 
     write_sample(
-        root.join("AGENTS.md").as_path(),
+        &root.join("AGENTS.md"),
         "# Agents\n",
         force,
         "AGENTS.md",
         &mut out,
     )?;
     write_sample(
-        root.join(".agents/mcp.json").as_path(),
-        &mcp::empty_mcp(),
+        &agents_dir.join("mcp.json"),
+        mcp::EMPTY_MCP,
         force,
         ".agents/mcp.json",
         &mut out,
     )?;
     write_sample(
-        root.join(".agents/rules/code-style.md").as_path(),
+        &agents_dir.join("rules/code-style.md"),
         "---\npaths:\n- \"**/*.rs\"\n---\nUse clear, direct Rust code.\n",
         force,
         ".agents/rules/code-style.md",
         &mut out,
     )?;
     write_sample(
-        root.join(".agents/skills/example-skill/SKILL.md").as_path(),
+        &agents_dir.join("skills/example-skill/SKILL.md"),
         "# Example Skill\n\nUse this as a placeholder skill.\n",
         force,
         ".agents/skills/example-skill/SKILL.md",
@@ -86,7 +87,7 @@ pub fn run(root: &Path, tools: Option<&str>, force: bool) -> Result<CommandOutpu
     Ok(out)
 }
 
-fn create_dir(root: &Path, path: &Path, _force: bool, out: &mut CommandOutput) -> Result<()> {
+fn create_dir(root: &Path, path: &Path, out: &mut CommandOutput) -> Result<()> {
     if path.exists() {
         out.push(format!("ok       {}", rel(root, path)));
     } else {

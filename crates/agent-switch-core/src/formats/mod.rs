@@ -5,39 +5,45 @@ pub mod opencode;
 
 use std::path::Path;
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 
-pub fn export(format: &str, source_path: &Path, source: &str) -> Result<String> {
-    match format {
-        "copilot-agent" => copilot::export_agent(source),
-        "copilot-prompt" => copilot::export_prompt(source),
-        "copilot-instructions" => copilot::export_instructions(source),
-        "opencode-agent" => opencode::export_agent(source),
-        "codex-agent" => codex::export_agent(source),
-        _ => Err(anyhow!("error: unsupported generate format: {format}")),
+use crate::tool::Format;
+
+impl Format {
+    pub fn export(self, source: &str) -> Result<String> {
+        let out = match self {
+            Format::CopilotAgent => copilot::export_agent(source),
+            Format::CopilotPrompt => copilot::export_prompt(source),
+            Format::CopilotInstructions => copilot::export_instructions(source),
+            Format::OpencodeAgent => opencode::export_agent(source),
+            Format::CodexAgent => codex::export_agent(source),
+        }?;
+        Ok(ensure_trailing_newline(out))
     }
-    .map(|mut out| {
-        if !out.ends_with('\n') {
-            out.push('\n');
-        }
-        let _ = source_path;
-        out
-    })
+
+    pub fn import(self, generated_path: &Path, generated: &str) -> Result<String> {
+        let out = match self {
+            Format::CopilotAgent => copilot::import_agent(generated),
+            Format::CopilotPrompt => copilot::import_prompt(generated),
+            Format::CopilotInstructions => copilot::import_instructions(generated),
+            Format::OpencodeAgent => opencode::import_agent(generated_path, generated),
+            Format::CodexAgent => codex::import_agent(generated),
+        }?;
+        Ok(ensure_trailing_newline(out))
+    }
 }
 
-pub fn import(format: &str, generated_path: &Path, generated: &str) -> Result<String> {
-    match format {
-        "copilot-agent" => copilot::import_agent(generated),
-        "copilot-prompt" => copilot::import_prompt(generated),
-        "copilot-instructions" => copilot::import_instructions(generated),
-        "opencode-agent" => opencode::import_agent(generated_path, generated),
-        "codex-agent" => codex::import_agent(generated),
-        _ => Err(anyhow!("error: unsupported generate format: {format}")),
+pub fn export(format: Format, source: &str) -> Result<String> {
+    format.export(source)
+}
+
+pub fn import(format: Format, generated_path: &Path, generated: &str) -> Result<String> {
+    format.import(generated_path, generated)
+}
+
+fn ensure_trailing_newline(mut text: String) -> String {
+    if !text.ends_with('\n') {
+        text.push('\n');
     }
-    .map(|mut out| {
-        if !out.ends_with('\n') {
-            out.push('\n');
-        }
-        out
-    })
+    text
 }

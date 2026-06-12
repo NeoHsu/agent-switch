@@ -6,9 +6,11 @@ use std::{
 use anyhow::Result;
 
 use crate::{
+    CommandOutput, ExitCode,
     config::{self, Config},
     fs::{abs, is_fake_symlink, relative_link, remove_file_or_empty_dir, repo_path},
-    manifest, sync, CommandOutput, ExitCode,
+    manifest, sync,
+    tool::Tool,
 };
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -22,7 +24,7 @@ pub struct SetupOptions {
 pub fn run(
     root: &Path,
     cfg: &Config,
-    tools: Option<&[String]>,
+    tools: Option<&[Tool]>,
     opts: SetupOptions,
 ) -> Result<CommandOutput> {
     let mut out = CommandOutput::default();
@@ -57,11 +59,12 @@ pub fn run(
                 continue;
             }
             remove_file_or_empty_dir(&link_abs)?;
-            create_link_or_fallback(&link_abs, &target_abs, &rel_target)?;
-            out.push(format!(
-                "repaired {} -> {}",
-                repo_path(link_rel),
-                rel_target_display
+            let is_symlink = create_link_or_fallback(&link_abs, &target_abs, &rel_target)?;
+            out.push(link_message(
+                "repaired",
+                link_rel,
+                &rel_target_display,
+                is_symlink,
             ));
             continue;
         }
@@ -71,13 +74,20 @@ pub fn run(
                 drift = true;
                 if !opts.check {
                     remove_file_or_empty_dir(&link_abs)?;
-                    create_link_or_fallback(&link_abs, &target_abs, &rel_target)?;
+                    let is_symlink = create_link_or_fallback(&link_abs, &target_abs, &rel_target)?;
+                    out.push(link_message(
+                        "repaired",
+                        link_rel,
+                        &rel_target_display,
+                        is_symlink,
+                    ));
+                } else {
+                    out.push(format!(
+                        "repaired {} -> {}",
+                        repo_path(link_rel),
+                        rel_target_display
+                    ));
                 }
-                out.push(format!(
-                    "repaired {} -> {}",
-                    repo_path(link_rel),
-                    rel_target_display
-                ));
             } else {
                 out.push(format!(
                     "skipped  {}: existing real file or directory; merge it into {} and remove it before retrying",
@@ -90,13 +100,20 @@ pub fn run(
 
         drift = true;
         if !opts.check {
-            create_link_or_fallback(&link_abs, &target_abs, &rel_target)?;
+            let is_symlink = create_link_or_fallback(&link_abs, &target_abs, &rel_target)?;
+            out.push(link_message(
+                "created ",
+                link_rel,
+                &rel_target_display,
+                is_symlink,
+            ));
+        } else {
+            out.push(format!(
+                "created  {} -> {}",
+                repo_path(link_rel),
+                rel_target_display
+            ));
         }
-        out.push(format!(
-            "created  {} -> {}",
-            repo_path(link_rel),
-            rel_target_display
-        ));
     }
 
     if opts.check && drift {
@@ -115,7 +132,7 @@ pub fn run(
 fn prune_unselected(
     root: &Path,
     cfg: &Config,
-    tools: Option<&[String]>,
+    tools: Option<&[Tool]>,
     check: bool,
     out: &mut CommandOutput,
 ) -> Result<bool> {
@@ -139,19 +156,10 @@ fn prune_unselected(
         let link_key = repo_path(link_rel);
         let had_manifest_link = sync_manifest.links.contains_key(&link_key);
 
-        if is_correct_link(&link_abs, &target_abs)? {
-            changed = true;
-            if !check {
-                remove_file_or_empty_dir(&link_abs)?;
-            }
-            out.push(format!("removed: {}", link_key));
-        } else if is_fake_symlink(&link_abs, &rel_target, target) {
-            changed = true;
-            if !check {
-                remove_file_or_empty_dir(&link_abs)?;
-            }
-            out.push(format!("removed: {}", link_key));
-        } else if sync_manifest.links.contains_key(&link_key) && link_abs.is_file() {
+        let managed = is_correct_link(&link_abs, &target_abs)?
+            || is_fake_symlink(&link_abs, &rel_target, target)
+            || (had_manifest_link && link_abs.is_file());
+        if managed {
             changed = true;
             if !check {
                 remove_file_or_empty_dir(&link_abs)?;
@@ -213,41 +221,64 @@ fn normalize_lexical(path: &Path) -> PathBuf {
     out
 }
 
+/// Returns `true` if a real symlink (or junction on Windows) was created,
+/// `false` if the platform fell back to a plain file copy.
 #[cfg(unix)]
-fn create_link_or_fallback(link: &Path, target: &Path, rel_target: &Path) -> Result<()> {
+fn create_link_or_fallback(link: &Path, _target: &Path, rel_target: &Path) -> Result<bool> {
     if let Some(parent) = link.parent() {
         fs::create_dir_all(parent)?;
     }
     std::os::unix::fs::symlink(rel_target, link)?;
-    let _ = target;
-    Ok(())
+    Ok(true)
 }
 
 #[cfg(windows)]
-fn create_link_or_fallback(link: &Path, target: &Path, rel_target: &Path) -> Result<()> {
+fn create_link_or_fallback(link: &Path, target: &Path, rel_target: &Path) -> Result<bool> {
     use std::os::windows::fs::{symlink_dir, symlink_file};
     use std::process::Command;
     if let Some(parent) = link.parent() {
         fs::create_dir_all(parent)?;
     }
     if target.is_dir() {
-        if symlink_dir(rel_target, link).is_err() {
-            let status = Command::new("cmd")
-                .args(["/C", "mklink", "/J"])
-                .arg(link)
-                .arg(target)
-                .status()?;
-            if !status.success() {
-                anyhow::bail!("error: failed to create junction: {}", link.display());
-            }
+        if symlink_dir(rel_target, link).is_ok() {
+            return Ok(true);
         }
-    } else if symlink_file(rel_target, link).is_err() {
+        let status = Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .status()?;
+        if !status.success() {
+            anyhow::bail!(
+                "failed to create directory junction for {}; \
+                 enable Developer Mode or run as administrator to allow symlinks",
+                link.display()
+            );
+        }
+        Ok(true)
+    } else if symlink_file(rel_target, link).is_ok() {
+        Ok(true)
+    } else {
+        // File symlinks require Developer Mode or administrator rights on Windows.
+        // Fall back to a plain copy so the tool remains functional.
         crate::fs::copy_file(target, link)?;
+        Ok(false)
     }
-    Ok(())
 }
 
 #[cfg(not(any(unix, windows)))]
-fn create_link_or_fallback(link: &Path, target: &Path, _rel_target: &Path) -> Result<()> {
-    crate::fs::copy_file(target, link)
+fn create_link_or_fallback(link: &Path, target: &Path, _rel_target: &Path) -> Result<bool> {
+    crate::fs::copy_file(target, link)?;
+    Ok(false)
+}
+
+fn link_message(prefix: &str, link: &Path, rel_target: &str, is_symlink: bool) -> String {
+    if is_symlink {
+        format!("{prefix} {} -> {rel_target}", repo_path(link))
+    } else {
+        format!(
+            "{prefix} {} (copy; symlinks unavailable — enable Developer Mode on Windows)",
+            repo_path(link)
+        )
+    }
 }

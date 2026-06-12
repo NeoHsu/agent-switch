@@ -1,10 +1,12 @@
-use std::{collections::BTreeMap, fs, path::Path};
+use std::{collections::BTreeMap, path::Path};
+
+use std::fs;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::TOOL_VERSION;
+use crate::{TOOL_VERSION, fs::read_text};
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct Manifest {
@@ -44,7 +46,7 @@ pub fn load(path: &Path) -> Result<Manifest> {
     if !path.exists() {
         return Ok(Manifest::default());
     }
-    let content = fs::read_to_string(path)?;
+    let content = read_text(path)?;
     let mut manifest: Manifest = serde_json::from_str(&content)?;
     if manifest.meta.tool.is_empty() {
         manifest.meta = ManifestMeta::default();

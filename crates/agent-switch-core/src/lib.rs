@@ -7,8 +7,19 @@ pub mod manifest;
 pub mod mcp;
 pub mod setup;
 pub mod sync;
+pub mod tool;
 
 pub const TOOL_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Errors that map to a specific process exit code. Anything else surfaced
+/// through `anyhow` is treated as an I/O failure by the CLI.
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("{0}")]
+    Config(String),
+    #[error("{0}")]
+    Unsupported(String),
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExitCode {

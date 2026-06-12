@@ -1,7 +1,6 @@
 use std::path::Path;
 
 use anyhow::Result;
-use serde_yaml::Value;
 
 use super::markdown::{self, base_with_namespace, canonical_with_tool_ns, render, set_string};
 
@@ -20,10 +19,11 @@ pub fn import_agent(path: &Path, source: &str) -> Result<String> {
         &["description"],
         &["description", "mode"],
     );
-    if !fm.contains_key(Value::String("name".into())) {
-        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-            set_string(&mut fm, "name", stem);
-        }
+    // In serde_yml, Mapping::contains_key takes &str directly.
+    if !fm.contains_key("name")
+        && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+    {
+        set_string(&mut fm, "name", stem);
     }
     render(fm, &doc.body)
 }

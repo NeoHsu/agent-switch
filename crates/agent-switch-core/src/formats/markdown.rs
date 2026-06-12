@@ -1,7 +1,7 @@
-use std::collections::BTreeMap;
+use std::{borrow::Cow, collections::BTreeMap};
 
 use anyhow::Result;
-use serde_yaml::{Mapping, Value};
+use serde_yml::{Mapping, Value};
 
 #[derive(Debug, Clone)]
 pub struct MarkdownDoc {
@@ -10,32 +10,70 @@ pub struct MarkdownDoc {
 }
 
 pub fn parse(input: &str) -> Result<MarkdownDoc> {
-    if !input.starts_with("---\n") {
+    // Normalize CRLF so frontmatter fences still parse on files checked out
+    // with Windows line endings.
+    let text: Cow<'_, str> = if input.contains("\r\n") {
+        Cow::Owned(input.replace("\r\n", "\n"))
+    } else {
+        Cow::Borrowed(input)
+    };
+    let Some(rest) = text.strip_prefix("---\n") else {
         return Ok(MarkdownDoc {
             frontmatter: Mapping::new(),
-            body: input.to_string(),
+            body: text.into_owned(),
         });
-    }
-    let rest = &input[4..];
-    if let Some(end) = rest.find("\n---") {
-        let yaml = &rest[..end];
-        let after = &rest[end + 4..];
-        let body = after.strip_prefix('\n').unwrap_or(after).to_string();
-        let frontmatter = serde_yaml::from_str::<Mapping>(yaml)?;
-        Ok(MarkdownDoc { frontmatter, body })
-    } else {
-        Ok(MarkdownDoc {
+    };
+    let Some((yaml, body)) = split_closing_fence(rest) else {
+        return Ok(MarkdownDoc {
             frontmatter: Mapping::new(),
-            body: input.to_string(),
-        })
+            body: text.into_owned(),
+        });
+    };
+    let frontmatter = if yaml.trim().is_empty() {
+        Mapping::new()
+    } else {
+        serde_yml::from_str::<Mapping>(yaml)?
+    };
+    Ok(MarkdownDoc {
+        frontmatter,
+        body: body.to_string(),
+    })
+}
+
+/// Splits the text after the opening fence at the first `---` that forms a
+/// complete line, returning the YAML part and the body after the fence.
+fn split_closing_fence(rest: &str) -> Option<(&str, &str)> {
+    if let Some(body) = rest.strip_prefix("---\n") {
+        return Some(("", body));
     }
+    if rest == "---" {
+        return Some(("", ""));
+    }
+    let mut from = 0;
+    while let Some(pos) = rest[from..].find("\n---") {
+        let start = from + pos;
+        let after = &rest[start + 4..];
+        if after.is_empty() {
+            return Some((&rest[..start + 1], ""));
+        }
+        if let Some(body) = after.strip_prefix('\n') {
+            return Some((&rest[..start + 1], body));
+        }
+        from = start + 4;
+    }
+    None
 }
 
 pub fn render(frontmatter: Mapping, body: &str) -> Result<String> {
     if frontmatter.is_empty() {
         return Ok(body.to_string());
     }
-    let yaml = serde_yaml::to_string(&frontmatter)?;
+    let mut yaml = serde_yml::to_string(&frontmatter)?;
+    // serde_yml does not always append a trailing newline; ensure one is present
+    // so the closing `---` fence appears on its own line.
+    if !yaml.ends_with('\n') {
+        yaml.push('\n');
+    }
     Ok(format!(
         "---\n{}---\n{}",
         yaml,
@@ -43,21 +81,21 @@ pub fn render(frontmatter: Mapping, body: &str) -> Result<String> {
     ))
 }
 
+// In serde_yml, Mapping keys are String (not Value), so all lookups use &str.
+
 pub fn str_value(map: &Mapping, key: &str) -> Option<String> {
-    map.get(Value::String(key.into()))
-        .and_then(Value::as_str)
-        .map(ToOwned::to_owned)
+    map.get(key).and_then(Value::as_str).map(ToOwned::to_owned)
 }
 
 pub fn mapping_value(map: &Mapping, key: &str) -> Mapping {
-    map.get(Value::String(key.into()))
+    map.get(key)
         .and_then(Value::as_mapping)
         .cloned()
         .unwrap_or_default()
 }
 
 pub fn set_string(map: &mut Mapping, key: &str, value: impl Into<String>) {
-    map.insert(Value::String(key.into()), Value::String(value.into()));
+    map.insert(key, Value::String(value.into()));
 }
 
 pub fn merge_mapping(map: &mut Mapping, other: Mapping) {
@@ -69,10 +107,7 @@ pub fn merge_mapping(map: &mut Mapping, other: Mapping) {
 pub fn namespace_from_extra(base: &Mapping, exclude: &[&str]) -> Mapping {
     let mut out = Mapping::new();
     for (key, value) in base {
-        let Some(key_str) = key.as_str() else {
-            continue;
-        };
-        if !exclude.contains(&key_str) {
+        if !exclude.contains(&key.as_str()) {
             out.insert(key.clone(), value.clone());
         }
     }
@@ -82,8 +117,8 @@ pub fn namespace_from_extra(base: &Mapping, exclude: &[&str]) -> Mapping {
 pub fn base_with_namespace(source: &Mapping, namespace: &str, include: &[&str]) -> Mapping {
     let mut out = Mapping::new();
     for key in include {
-        if let Some(value) = source.get(Value::String((*key).into())) {
-            out.insert(Value::String((*key).into()), value.clone());
+        if let Some(value) = source.get(key) {
+            out.insert(*key, value.clone());
         }
     }
     let ns = mapping_value(source, namespace);
@@ -99,19 +134,19 @@ pub fn canonical_with_tool_ns(
 ) -> Mapping {
     let mut out = Mapping::new();
     for key in base_keys {
-        if let Some(value) = generated.get(Value::String((*key).into())) {
-            out.insert(Value::String((*key).into()), value.clone());
+        if let Some(value) = generated.get(key) {
+            out.insert(*key, value.clone());
         }
     }
     let ns = namespace_from_extra(generated, exclude);
     if !ns.is_empty() {
-        out.insert(Value::String(tool.into()), Value::Mapping(ns));
+        out.insert(tool, Value::Mapping(ns));
     }
     out
 }
 
 pub fn paths_to_apply_to(frontmatter: &Mapping) -> String {
-    let Some(paths) = frontmatter.get(Value::String("paths".into())) else {
+    let Some(paths) = frontmatter.get("paths") else {
         return "**".into();
     };
     match paths {
@@ -142,13 +177,65 @@ pub fn apply_to_to_paths(apply_to: Option<String>, frontmatter: &mut Mapping) {
         .map(|s| Value::String(s.into()))
         .collect::<Vec<_>>();
     if !values.is_empty() {
-        frontmatter.insert(Value::String("paths".into()), Value::Sequence(values));
+        frontmatter.insert("paths", Value::Sequence(values));
     }
 }
 
 pub fn mapping_from_pairs(pairs: BTreeMap<String, Value>) -> Mapping {
-    pairs
-        .into_iter()
-        .map(|(k, v)| (Value::String(k), v))
-        .collect()
+    pairs.into_iter().collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_crlf_frontmatter() {
+        let doc = parse("---\r\nname: a\r\n---\r\nbody\r\n").unwrap();
+        assert_eq!(str_value(&doc.frontmatter, "name").as_deref(), Some("a"));
+        assert_eq!(doc.body, "body\n");
+    }
+
+    #[test]
+    fn missing_closing_fence_is_treated_as_body() {
+        let input = "---\nname: a\nbody without closing fence\n";
+        let doc = parse(input).unwrap();
+        assert!(doc.frontmatter.is_empty());
+        assert_eq!(doc.body, input);
+    }
+
+    #[test]
+    fn empty_frontmatter_block_parses() {
+        let doc = parse("---\n---\nbody\n").unwrap();
+        assert!(doc.frontmatter.is_empty());
+        assert_eq!(doc.body, "body\n");
+    }
+
+    #[test]
+    fn closing_fence_at_end_of_input() {
+        let doc = parse("---\nname: a\n---").unwrap();
+        assert_eq!(str_value(&doc.frontmatter, "name").as_deref(), Some("a"));
+        assert_eq!(doc.body, "");
+    }
+
+    #[test]
+    fn fence_must_be_a_complete_line() {
+        let doc = parse("---\nname: a\n---\ndashes\n----\nmore\n").unwrap();
+        assert_eq!(str_value(&doc.frontmatter, "name").as_deref(), Some("a"));
+        assert_eq!(doc.body, "dashes\n----\nmore\n");
+    }
+
+    #[test]
+    fn no_frontmatter_passthrough() {
+        let doc = parse("plain body\n").unwrap();
+        assert!(doc.frontmatter.is_empty());
+        assert_eq!(doc.body, "plain body\n");
+    }
+
+    #[test]
+    fn render_round_trips() {
+        let doc = parse("---\nname: a\ndescription: b\n---\nbody\n").unwrap();
+        let rendered = render(doc.frontmatter, &doc.body).unwrap();
+        assert_eq!(rendered, "---\nname: a\ndescription: b\n---\nbody\n");
+    }
 }

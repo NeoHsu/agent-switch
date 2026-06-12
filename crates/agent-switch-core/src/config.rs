@@ -2,22 +2,20 @@ use std::{
     collections::BTreeMap,
     env, fs,
     path::{Path, PathBuf},
+    str::FromStr,
 };
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
+
+use crate::{
+    Error,
+    fs::read_text,
+    tool::{self, Format, MergeFormat, Tool},
+};
 
 pub const CONFIG_FILE: &str = ".agent-switch.yaml";
 pub const LEGACY_CONFIG_FILE: &str = ".agentstitch.yaml";
-
-pub const SUPPORTED_TOOLS: &[&str] = &[
-    "claude",
-    "codex",
-    "copilot",
-    "opencode",
-    "pi",
-    "antigravity",
-];
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Config {
@@ -38,24 +36,67 @@ pub struct Config {
 pub struct GenerateSpec {
     pub from: PathBuf,
     pub to: PathBuf,
-    pub format: String,
+    pub format: Format,
     #[serde(default)]
     pub suffix: Option<String>,
     #[serde(default)]
     pub recursive: bool,
     #[serde(default)]
-    pub tool: Option<String>,
+    pub tool: Option<Tool>,
     #[serde(default)]
-    pub tools: Option<Vec<String>>,
+    pub tools: Option<Vec<Tool>>,
+}
+
+impl GenerateSpec {
+    pub fn effective_tools(&self) -> Vec<Tool> {
+        explicit_tools(self.tool, self.tools.as_deref()).unwrap_or_else(|| vec![self.format.tool()])
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MergeSpec {
     pub to: PathBuf,
+    /// Explicit merge format. When absent, format is inferred from the spec id
+    /// and `to` path for backward compatibility with existing configs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<MergeFormat>,
     #[serde(default)]
-    pub tool: Option<String>,
+    pub tool: Option<Tool>,
     #[serde(default)]
-    pub tools: Option<Vec<String>>,
+    pub tools: Option<Vec<Tool>>,
+}
+
+impl MergeSpec {
+    /// Resolves the merge format: explicit field takes precedence, then falls
+    /// back to heuristic inference from the spec id and `to` path.
+    pub fn resolve_format(&self, id: &str) -> Option<MergeFormat> {
+        self.format.or_else(|| {
+            if id.starts_with("codex-") || self.to.starts_with(".codex") {
+                Some(MergeFormat::Codex)
+            } else if id.starts_with("opencode-") || self.to.as_path() == Path::new("opencode.json")
+            {
+                Some(MergeFormat::Opencode)
+            } else {
+                None
+            }
+        })
+    }
+
+    pub fn effective_tools(&self, id: &str) -> Vec<Tool> {
+        explicit_tools(self.tool, self.tools.as_deref()).unwrap_or_else(|| {
+            self.resolve_format(id)
+                .map(MergeFormat::tool)
+                .into_iter()
+                .collect()
+        })
+    }
+}
+
+fn explicit_tools(tool: Option<Tool>, tools: Option<&[Tool]>) -> Option<Vec<Tool>> {
+    match tools {
+        Some(tools) => Some(tools.to_vec()),
+        None => tool.map(|tool| vec![tool]),
+    }
 }
 
 fn default_agents_dir() -> PathBuf {
@@ -66,101 +107,106 @@ fn default_manifest() -> PathBuf {
     PathBuf::from(".agents/.sync-manifest.json")
 }
 
+const DEFAULT_SYMLINKS: &[(&str, &str)] = &[
+    (".claude/skills", ".agents/skills"),
+    (".claude/agents", ".agents/agents"),
+    (".claude/commands", ".agents/commands"),
+    (".claude/rules", ".agents/rules"),
+    (".opencode/commands", ".agents/commands"),
+    (".agent/rules", ".agents/rules"),
+    (".agent/workflows", ".agents/commands"),
+    (".agent/skills", ".agents/skills"),
+    (".mcp.json", ".agents/mcp.json"),
+    (".copilot/mcp-config.json", ".agents/mcp.json"),
+    (".pi/mcp.json", ".agents/mcp.json"),
+    ("CLAUDE.md", "AGENTS.md"),
+];
+
+const DEFAULT_GENERATE: &[(&str, &str, &str, Format, &str, bool)] = &[
+    (
+        "copilot-agents",
+        ".agents/agents",
+        ".github/agents",
+        Format::CopilotAgent,
+        ".agent.md",
+        false,
+    ),
+    (
+        "copilot-prompts",
+        ".agents/commands",
+        ".github/prompts",
+        Format::CopilotPrompt,
+        ".prompt.md",
+        false,
+    ),
+    (
+        "copilot-instructions",
+        ".agents/rules",
+        ".github/instructions",
+        Format::CopilotInstructions,
+        ".instructions.md",
+        true,
+    ),
+    (
+        "opencode-agents",
+        ".agents/agents",
+        ".opencode/agents",
+        Format::OpencodeAgent,
+        ".md",
+        false,
+    ),
+    (
+        "codex-agents",
+        ".agents/agents",
+        ".codex/agents",
+        Format::CodexAgent,
+        ".toml",
+        false,
+    ),
+];
+
+const DEFAULT_MERGE: &[(&str, &str)] = &[
+    ("opencode-config", "opencode.json"),
+    ("codex-config", ".codex/config.toml"),
+];
+
 impl Default for Config {
     fn default() -> Self {
-        let mut symlinks = BTreeMap::new();
-        symlinks.insert(".claude/skills".into(), ".agents/skills".into());
-        symlinks.insert(".claude/agents".into(), ".agents/agents".into());
-        symlinks.insert(".claude/commands".into(), ".agents/commands".into());
-        symlinks.insert(".claude/rules".into(), ".agents/rules".into());
-        symlinks.insert(".opencode/commands".into(), ".agents/commands".into());
-        symlinks.insert(".agent/rules".into(), ".agents/rules".into());
-        symlinks.insert(".agent/workflows".into(), ".agents/commands".into());
-        symlinks.insert(".agent/skills".into(), ".agents/skills".into());
-        symlinks.insert(".mcp.json".into(), ".agents/mcp.json".into());
-        symlinks.insert(".copilot/mcp-config.json".into(), ".agents/mcp.json".into());
-        symlinks.insert(".pi/mcp.json".into(), ".agents/mcp.json".into());
-        symlinks.insert("CLAUDE.md".into(), "AGENTS.md".into());
-
-        let mut generate = BTreeMap::new();
-        generate.insert(
-            "copilot-agents".into(),
-            GenerateSpec {
-                from: ".agents/agents".into(),
-                to: ".github/agents".into(),
-                format: "copilot-agent".into(),
-                suffix: Some(".agent.md".into()),
-                recursive: false,
-                tool: None,
-                tools: None,
-            },
-        );
-        generate.insert(
-            "copilot-prompts".into(),
-            GenerateSpec {
-                from: ".agents/commands".into(),
-                to: ".github/prompts".into(),
-                format: "copilot-prompt".into(),
-                suffix: Some(".prompt.md".into()),
-                recursive: false,
-                tool: None,
-                tools: None,
-            },
-        );
-        generate.insert(
-            "copilot-instructions".into(),
-            GenerateSpec {
-                from: ".agents/rules".into(),
-                to: ".github/instructions".into(),
-                format: "copilot-instructions".into(),
-                suffix: Some(".instructions.md".into()),
-                recursive: true,
-                tool: None,
-                tools: None,
-            },
-        );
-        generate.insert(
-            "opencode-agents".into(),
-            GenerateSpec {
-                from: ".agents/agents".into(),
-                to: ".opencode/agents".into(),
-                format: "opencode-agent".into(),
-                suffix: Some(".md".into()),
-                recursive: false,
-                tool: None,
-                tools: None,
-            },
-        );
-        generate.insert(
-            "codex-agents".into(),
-            GenerateSpec {
-                from: ".agents/agents".into(),
-                to: ".codex/agents".into(),
-                format: "codex-agent".into(),
-                suffix: Some(".toml".into()),
-                recursive: false,
-                tool: None,
-                tools: None,
-            },
-        );
-
-        let mut merge = BTreeMap::new();
-        merge.insert(
-            "opencode-config".into(),
-            MergeSpec {
-                to: "opencode.json".into(),
-                tool: None,
-                tools: None,
-            },
-        );
-        merge.insert(
-            "codex-config".into(),
-            MergeSpec {
-                to: ".codex/config.toml".into(),
-                tool: None,
-                tools: None,
-            },
-        );
+        let symlinks = DEFAULT_SYMLINKS
+            .iter()
+            .map(|(link, target)| (link.to_string(), target.to_string()))
+            .collect();
+        let generate = DEFAULT_GENERATE
+            .iter()
+            .map(|&(id, from, to, format, suffix, recursive)| {
+                (
+                    id.to_string(),
+                    GenerateSpec {
+                        from: from.into(),
+                        to: to.into(),
+                        format,
+                        suffix: Some(suffix.to_string()),
+                        recursive,
+                        tool: None,
+                        tools: None,
+                    },
+                )
+            })
+            .collect();
+        let merge = DEFAULT_MERGE
+            .iter()
+            .map(|&(id, to)| {
+                (
+                    id.to_string(),
+                    MergeSpec {
+                        to: to.into(),
+                        format: None,
+                        tool: None,
+                        tools: None,
+                    },
+                )
+            })
+            .collect();
 
         Self {
             version: 1,
@@ -187,10 +233,10 @@ pub fn load_config(root: &Path, explicit: Option<&Path>) -> Result<(Config, Path
     } else {
         root.join(CONFIG_FILE)
     };
-    let content = fs::read_to_string(&path)
-        .with_context(|| format!("error: failed to read config: {}", path.display()))?;
-    let cfg: Config = serde_yaml::from_str(&content)
-        .with_context(|| format!("error: invalid config: {}", path.display()))?;
+    let content = read_text(&path)
+        .map_err(|err| Error::Config(format!("failed to read config {}: {err}", path.display())))?;
+    let cfg: Config = serde_yml::from_str(&content)
+        .map_err(|err| Error::Config(format!("invalid config {}: {err}", path.display())))?;
     validate_config(&cfg)?;
     Ok((cfg, path))
 }
@@ -202,7 +248,7 @@ pub fn write_default_config(path: &Path, force: bool) -> Result<bool> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let text = serde_yaml::to_string(&Config::default())?;
+    let text = serde_yml::to_string(&Config::default())?;
     fs::write(path, text)?;
     Ok(true)
 }
@@ -210,10 +256,6 @@ pub fn write_default_config(path: &Path, force: bool) -> Result<bool> {
 pub fn find_root(explicit: Option<&Path>) -> Result<PathBuf> {
     if let Some(root) = explicit {
         return Ok(root.canonicalize().unwrap_or_else(|_| root.to_path_buf()));
-    }
-    if let Ok(root) = env::var("AGENT_SWITCH_ROOT").or_else(|_| env::var("AGENTSTITCH_ROOT")) {
-        let path = PathBuf::from(root);
-        return Ok(path.canonicalize().unwrap_or(path));
     }
     let mut dir = env::current_dir()?;
     loop {
@@ -230,156 +272,51 @@ pub fn find_root(explicit: Option<&Path>) -> Result<PathBuf> {
     }
 }
 
-pub fn parse_tools(
-    cli_tool: Option<&str>,
-    cli_target: Option<&str>,
-) -> Result<Option<Vec<String>>> {
-    let value = cli_tool
-        .or(cli_target)
-        .map(str::to_owned)
-        .or_else(|| env::var("AGENT_SWITCH_TOOLS").ok())
-        .or_else(|| env::var("AGENTSTITCH_TOOLS").ok());
-    let Some(value) = value else {
-        return Ok(None);
-    };
-    if value.trim().is_empty() {
-        return Err(anyhow!(
-            "error: --tool requires a comma-separated tool list"
-        ));
-    }
+pub fn parse_tools(value: &str) -> Result<Vec<Tool>> {
     let tools = value
         .split(',')
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .map(validate_tool)
-        .collect::<Result<Vec<_>>>()?;
+        .map(Tool::from_str)
+        .collect::<Result<Vec<_>, _>>()?;
     if tools.is_empty() {
-        return Err(anyhow!(
-            "error: --tool requires a comma-separated tool list"
-        ));
+        return Err(Error::Config("--tool requires a comma-separated tool list".into()).into());
     }
-    Ok(Some(tools))
-}
-
-pub fn validate_tool(tool: &str) -> Result<String> {
-    if SUPPORTED_TOOLS.contains(&tool) {
-        Ok(tool.to_string())
-    } else {
-        Err(anyhow!(
-            "error: unknown tool: {}; supported tools: {}",
-            tool,
-            SUPPORTED_TOOLS.join(", ")
-        ))
-    }
+    Ok(tools)
 }
 
 pub fn validate_config(cfg: &Config) -> Result<()> {
     if cfg.version != 1 {
-        return Err(anyhow!(
-            "error: unsupported config version: {}",
-            cfg.version
-        ));
-    }
-    for (id, spec) in &cfg.generate {
-        validate_declared_tools(spec.tool.as_ref(), spec.tools.as_ref())
-            .with_context(|| format!("error: invalid tools for generate mapping: {id}"))?;
+        return Err(
+            Error::Unsupported(format!("unsupported config version: {}", cfg.version)).into(),
+        );
     }
     for (id, spec) in &cfg.merge {
-        validate_declared_tools(spec.tool.as_ref(), spec.tools.as_ref())
-            .with_context(|| format!("error: invalid tools for merge mapping: {id}"))?;
-    }
-    Ok(())
-}
-
-fn validate_declared_tools(tool: Option<&String>, tools: Option<&Vec<String>>) -> Result<()> {
-    if let Some(tool) = tool {
-        validate_tool(tool)?;
-    }
-    if let Some(tools) = tools {
-        for tool in tools {
-            validate_tool(tool)?;
+        if spec.resolve_format(id).is_none() {
+            return Err(Error::Config(format!(
+                "merge spec '{id}': cannot determine format; set an explicit `format:` field (supported: opencode, codex)"
+            ))
+            .into());
         }
     }
     Ok(())
 }
 
-pub fn generate_selected(id: &str, spec: &GenerateSpec, filter: Option<&[String]>) -> bool {
-    selected(infer_generate_tools(id, spec), filter)
+pub fn generate_selected(spec: &GenerateSpec, filter: Option<&[Tool]>) -> bool {
+    selected(&spec.effective_tools(), filter)
 }
 
-pub fn merge_selected(id: &str, spec: &MergeSpec, filter: Option<&[String]>) -> bool {
-    let explicit = explicit_tools(spec.tool.as_ref(), spec.tools.as_ref());
-    let inferred = explicit.unwrap_or_else(|| {
-        if id.starts_with("codex-") || spec.to.starts_with(".codex") {
-            vec!["codex".into()]
-        } else if id.starts_with("opencode-") || spec.to == PathBuf::from("opencode.json") {
-            vec!["opencode".into()]
-        } else {
-            vec![]
-        }
-    });
-    selected(inferred, filter)
+pub fn merge_selected(id: &str, spec: &MergeSpec, filter: Option<&[Tool]>) -> bool {
+    selected(&spec.effective_tools(id), filter)
 }
 
-pub fn symlink_selected(link: &str, target: &str, filter: Option<&[String]>) -> bool {
-    selected(infer_symlink_tools(link, target), filter)
+pub fn symlink_selected(link: &str, target: &str, filter: Option<&[Tool]>) -> bool {
+    selected(tool::tools_for_link(link, target), filter)
 }
 
-fn selected(mapping_tools: Vec<String>, filter: Option<&[String]>) -> bool {
+fn selected(mapping_tools: &[Tool], filter: Option<&[Tool]>) -> bool {
     let Some(filter) = filter else {
         return true;
     };
-    mapping_tools
-        .iter()
-        .any(|tool| filter.iter().any(|f| f == tool))
-}
-
-fn infer_generate_tools(id: &str, spec: &GenerateSpec) -> Vec<String> {
-    if let Some(tools) = explicit_tools(spec.tool.as_ref(), spec.tools.as_ref()) {
-        return tools;
-    }
-    for tool in ["codex", "copilot", "opencode"] {
-        if id.starts_with(&format!("{tool}-")) {
-            return vec![tool.into()];
-        }
-    }
-    match spec.format.as_str() {
-        "codex-agent" => vec!["codex".into()],
-        "copilot-agent" | "copilot-prompt" | "copilot-instructions" => vec!["copilot".into()],
-        "opencode-agent" => vec!["opencode".into()],
-        _ => vec![],
-    }
-}
-
-fn explicit_tools(tool: Option<&String>, tools: Option<&Vec<String>>) -> Option<Vec<String>> {
-    if let Some(tools) = tools {
-        Some(tools.clone())
-    } else {
-        tool.map(|tool| vec![tool.clone()])
-    }
-}
-
-fn infer_symlink_tools(link: &str, target: &str) -> Vec<String> {
-    if link.starts_with(".claude/skills") {
-        return vec!["claude".into(), "pi".into()];
-    }
-    if link.starts_with(".claude/") || link == ".mcp.json" || link == "CLAUDE.md" {
-        return vec!["claude".into()];
-    }
-    if link.starts_with(".copilot/") {
-        return vec!["copilot".into()];
-    }
-    if link.starts_with(".opencode/") {
-        return vec!["opencode".into()];
-    }
-    if link.starts_with(".pi/") {
-        return vec!["pi".into()];
-    }
-    if link.starts_with(".agent/") {
-        return vec!["antigravity".into()];
-    }
-    if target.contains(".agents/skills") {
-        return vec!["claude".into(), "pi".into()];
-    }
-    vec![]
+    mapping_tools.iter().any(|tool| filter.contains(tool))
 }

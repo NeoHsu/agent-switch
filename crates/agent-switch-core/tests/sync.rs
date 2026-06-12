@@ -1,9 +1,12 @@
 use std::{fs, path::Path};
 
+use serde_json::json;
+
 use agent_switch_core::{
+    Error, ExitCode,
     config::{self, Config},
     sync::{self, SyncOptions},
-    ExitCode,
+    tool::Tool,
 };
 use tempfile::tempdir;
 
@@ -92,15 +95,17 @@ fn full_sync_generates_outputs_and_check_passes() {
     let cfg = fixture(root);
 
     let out = sync::run(root, &cfg, None, SyncOptions::default()).unwrap();
-    assert!(out
-        .lines
-        .iter()
-        .any(|line| line == "generated: .github/agents/reviewer.agent.md"));
+    assert!(
+        out.lines
+            .iter()
+            .any(|line| line == "generated: .github/agents/reviewer.agent.md")
+    );
     assert!(root.join(".github/agents/reviewer.agent.md").exists());
     assert!(root.join(".github/prompts/fix.prompt.md").exists());
-    assert!(root
-        .join(".github/instructions/testing/unit.instructions.md")
-        .exists());
+    assert!(
+        root.join(".github/instructions/testing/unit.instructions.md")
+            .exists()
+    );
     assert!(root.join(".opencode/agents/reviewer.md").exists());
     assert!(root.join(".codex/agents/reviewer.toml").exists());
     assert!(root.join("opencode.json").exists());
@@ -124,12 +129,174 @@ fn full_sync_generates_outputs_and_check_passes() {
 }
 
 #[test]
+fn sync_can_output_machine_readable_json() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+    let cfg = fixture(root);
+
+    let out = sync::run(
+        root,
+        &cfg,
+        None,
+        SyncOptions {
+            json: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(out.lines.len(), 1);
+    let report: serde_json::Value = serde_json::from_str(&out.lines[0]).unwrap();
+    assert_eq!(report["exit"], json!("Ok"));
+    assert_eq!(report["exit_code"].as_i64().unwrap(), 0);
+    assert!(report["options"]["json"].as_bool().unwrap());
+    assert!(!report["events"].as_array().unwrap().is_empty());
+    assert_eq!(
+        report["summary"]["total_events"].as_u64().unwrap() as usize,
+        report["events"].as_array().unwrap().len()
+    );
+    assert!(
+        report["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["event"] == json!("generated"))
+    );
+    assert!(
+        report["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["event"] == json!("merged"))
+    );
+
+    let check = sync::run(
+        root,
+        &cfg,
+        None,
+        SyncOptions {
+            check: true,
+            json: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let report: serde_json::Value = serde_json::from_str(&check.lines[0]).unwrap();
+    assert_eq!(report["exit_code"].as_i64().unwrap(), 0);
+    assert!(
+        report["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["event"] == json!("synced_no_changes"))
+    );
+}
+
+#[test]
+fn sync_can_filter_json_events_by_kind() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+    let cfg = fixture(root);
+
+    let filter =
+        sync::parse_event_filter(&["generated".to_string(), "merged".to_string()]).unwrap();
+    let out = sync::run(
+        root,
+        &cfg,
+        None,
+        SyncOptions {
+            json: true,
+            event_filter: Some(filter),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    let report: serde_json::Value = serde_json::from_str(&out.lines[0]).unwrap();
+    let events = report["events"].as_array().unwrap();
+    assert!(!events.is_empty());
+    assert_eq!(
+        report["options"]["event_filter"],
+        json!(["generated", "merged"])
+    );
+    assert!(events.iter().all(|e| {
+        let kind = e["event"].as_str();
+        matches!(kind, Some("generated") | Some("merged"))
+    }));
+}
+
+#[test]
+fn sync_json_events_are_sorted_stably() {
+    let first = {
+        let temp = tempdir().unwrap();
+        let root = temp.path();
+        let cfg = fixture(root);
+        sync::run(
+            root,
+            &cfg,
+            None,
+            SyncOptions {
+                json: true,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+    };
+
+    let second = {
+        let temp = tempdir().unwrap();
+        let root = temp.path();
+        let cfg = fixture(root);
+        sync::run(
+            root,
+            &cfg,
+            None,
+            SyncOptions {
+                json: true,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+    };
+
+    assert_eq!(first.lines, second.lines);
+
+    let report: serde_json::Value = serde_json::from_str(&first.lines[0]).unwrap();
+    let order = report["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|event| event["event"].as_str().unwrap_or_default().to_string());
+    let order: Vec<String> = order.collect();
+    let expected = [
+        "imported",
+        "generated",
+        "removed",
+        "copied",
+        "warning",
+        "merged",
+        "drift",
+        "synced_no_changes",
+    ];
+
+    let mut last_index = 0;
+    for event in order {
+        let idx = expected
+            .iter()
+            .position(|kind| kind == &event.as_str())
+            .unwrap();
+        assert!(idx >= last_index, "event order is not stable: {event}");
+        last_index = idx;
+    }
+}
+
+#[test]
 fn tool_filter_only_generates_selected_tool_outputs() {
     let temp = tempdir().unwrap();
     let root = temp.path();
     let cfg = fixture(root);
 
-    sync::run(root, &cfg, Some(&["codex".into()]), SyncOptions::default()).unwrap();
+    sync::run(root, &cfg, Some(&[Tool::Codex]), SyncOptions::default()).unwrap();
 
     assert!(root.join(".codex/agents/reviewer.toml").exists());
     assert!(root.join(".codex/config.toml").exists());
@@ -143,13 +310,7 @@ fn generated_import_conflict_tool_side_wins_and_preserves_other_namespaces() {
     let root = temp.path();
     let cfg = fixture(root);
 
-    sync::run(
-        root,
-        &cfg,
-        Some(&["copilot".into()]),
-        SyncOptions::default(),
-    )
-    .unwrap();
+    sync::run(root, &cfg, Some(&[Tool::Copilot]), SyncOptions::default()).unwrap();
     write(
         &root.join(".github/agents/reviewer.agent.md"),
         r#"---
@@ -176,13 +337,7 @@ Canonical body changed.
 "#,
     );
 
-    let out = sync::run(
-        root,
-        &cfg,
-        Some(&["copilot".into()]),
-        SyncOptions::default(),
-    )
-    .unwrap();
+    let out = sync::run(root, &cfg, Some(&[Tool::Copilot]), SyncOptions::default()).unwrap();
     assert!(out.lines.iter().any(|line| {
         line == "imported(conflict, tool-side wins): .github/agents/reviewer.agent.md -> .agents/agents/reviewer.md"
     }));
@@ -196,18 +351,69 @@ Canonical body changed.
 }
 
 #[test]
+fn sync_rejects_mutually_exclusive_mode_flags() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+    let cfg = fixture(root);
+
+    let err = sync::run(
+        root,
+        &cfg,
+        None,
+        SyncOptions {
+            import_only: true,
+            export_only: true,
+            ..Default::default()
+        },
+    )
+    .unwrap_err();
+
+    let config_err = err
+        .downcast_ref::<Error>()
+        .expect("expected a config error from invalid sync options");
+    assert!(matches!(config_err, Error::Config(_)));
+}
+
+#[test]
+fn sync_generates_outputs_with_uppercase_markdown_sources() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+    let cfg = fixture(root);
+
+    write(
+        &root.join(".agents/agents/UPPER.MD"),
+        r#"---
+name: uppercase
+description: Source with uppercase extension.
+---
+Hello from uppercase extension.
+"#,
+    );
+
+    let out = sync::run(root, &cfg, None, SyncOptions::default()).unwrap();
+
+    assert!(
+        out.lines
+            .iter()
+            .any(|line| line == "generated: .github/agents/UPPER.agent.md")
+    );
+    assert!(root.join(".github/agents/UPPER.agent.md").exists());
+}
+
+#[test]
 fn stale_generated_file_is_removed_when_source_is_deleted() {
     let temp = tempdir().unwrap();
     let root = temp.path();
     let cfg = fixture(root);
 
-    sync::run(root, &cfg, Some(&["codex".into()]), SyncOptions::default()).unwrap();
+    sync::run(root, &cfg, Some(&[Tool::Codex]), SyncOptions::default()).unwrap();
     fs::remove_file(root.join(".agents/agents/reviewer.md")).unwrap();
 
-    let out = sync::run(root, &cfg, Some(&["codex".into()]), SyncOptions::default()).unwrap();
-    assert!(out
-        .lines
-        .iter()
-        .any(|line| line == "removed: .codex/agents/reviewer.toml"));
+    let out = sync::run(root, &cfg, Some(&[Tool::Codex]), SyncOptions::default()).unwrap();
+    assert!(
+        out.lines
+            .iter()
+            .any(|line| line == "removed: .codex/agents/reviewer.toml")
+    );
     assert!(!root.join(".codex/agents/reviewer.toml").exists());
 }

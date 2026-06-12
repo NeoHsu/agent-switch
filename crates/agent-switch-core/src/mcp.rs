@@ -1,42 +1,59 @@
-use std::{collections::BTreeMap, fs, path::Path};
+use std::path::Path;
 
 use anyhow::Result;
-use serde_json::{json, Value};
-use toml_edit::{value, DocumentMut, Item, Table};
+use serde_json::{Value, json};
+use toml_edit::{DocumentMut, Item, Table, value};
 
-use crate::fs::write_if_changed;
+use crate::{
+    Error,
+    fs::{read_text, write_if_changed},
+    tool::MergeFormat,
+};
 
 const CODEX_START: &str = "# >>> agent-switch:mcp >>>";
 const CODEX_END: &str = "# <<< agent-switch:mcp <<<";
 const LEGACY_CODEX_START: &str = "# >>> agentstitch:mcp >>>";
 const LEGACY_CODEX_END: &str = "# <<< agentstitch:mcp <<<";
 
-pub fn merge_opencode(
-    root: &Path,
+pub const EMPTY_MCP: &str = "{\n  \"mcpServers\": {}\n}\n";
+
+pub fn merge(
+    format: MergeFormat,
     canonical_mcp: &Path,
     target: &Path,
     check: bool,
 ) -> Result<bool> {
+    match format {
+        MergeFormat::Opencode => merge_opencode(canonical_mcp, target, check),
+        MergeFormat::Codex => merge_codex(canonical_mcp, target, check),
+    }
+}
+
+pub fn merge_opencode(canonical_mcp: &Path, target: &Path, check: bool) -> Result<bool> {
     if !canonical_mcp.exists() {
         return Ok(false);
     }
-    let canonical: Value = serde_json::from_str(&fs::read_to_string(canonical_mcp)?)?;
+    let canonical: Value = serde_json::from_str(&read_text(canonical_mcp)?)?;
     let mut target_json = if target.exists() {
-        serde_json::from_str::<Value>(&fs::read_to_string(target)?)?
+        serde_json::from_str::<Value>(&read_text(target)?)?
     } else {
         json!({})
     };
-    let obj = target_json.as_object_mut().expect("json object");
+    let obj = target_json.as_object_mut().ok_or_else(|| {
+        Error::Config(format!(
+            "merge target is not a JSON object: {}",
+            target.display()
+        ))
+    })?;
     obj.insert("mcp".into(), convert_opencode_mcp(&canonical));
     obj.entry("instructions").or_insert(json!([]));
     let text = format!("{}\n", serde_json::to_string_pretty(&target_json)?);
-    if target.exists() && fs::read_to_string(target).unwrap_or_default() == text {
+    if target.exists() && read_text(target).unwrap_or_default() == text {
         return Ok(false);
     }
     if !check {
         write_if_changed(target, &text)?;
     }
-    let _ = root;
     Ok(true)
 }
 
@@ -44,9 +61,9 @@ pub fn merge_codex(canonical_mcp: &Path, target: &Path, check: bool) -> Result<b
     if !canonical_mcp.exists() {
         return Ok(false);
     }
-    let canonical: Value = serde_json::from_str(&fs::read_to_string(canonical_mcp)?)?;
+    let canonical: Value = serde_json::from_str(&read_text(canonical_mcp)?)?;
     let block = render_codex_mcp_block(&canonical);
-    let existing = fs::read_to_string(target).unwrap_or_default();
+    let existing = read_text(target).unwrap_or_default();
     let next = replace_marker_block(&existing, &block);
     if existing == next {
         return Ok(false);
@@ -165,8 +182,9 @@ pub fn canonical_mcp_path(root: &Path, agents_dir: &Path) -> std::path::PathBuf 
     root.join(agents_dir).join("mcp.json")
 }
 
-pub fn empty_mcp() -> String {
-    let mut root = BTreeMap::new();
-    root.insert("mcpServers", BTreeMap::<String, Value>::new());
-    format!("{}\n", serde_json::to_string_pretty(&root).unwrap())
+/// Returns a canonical empty MCP config as a string. Used when initialising a
+/// new project so the file exists in the expected shape before any servers are
+/// configured.
+pub fn empty_mcp() -> &'static str {
+    EMPTY_MCP
 }

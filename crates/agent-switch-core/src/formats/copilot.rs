@@ -1,5 +1,4 @@
 use anyhow::Result;
-use serde_yaml::Value;
 
 use super::markdown::{
     self, apply_to_to_paths, base_with_namespace, canonical_with_tool_ns, paths_to_apply_to,
@@ -30,6 +29,8 @@ pub fn export_prompt(source: &str) -> Result<String> {
 }
 
 pub fn import_prompt(source: &str) -> Result<String> {
+    // Prompt and agent formats are identical on import. Kept as a separate
+    // function so any future divergence only requires changes here.
     import_agent(source)
 }
 
@@ -49,10 +50,11 @@ pub fn import_instructions(source: &str) -> Result<String> {
         &["description"],
         &["description", "applyTo"],
     );
+    // In serde_yml, Mapping::get takes &str directly.
     let apply_to = doc
         .frontmatter
-        .get(Value::String("applyTo".into()))
-        .and_then(Value::as_str)
+        .get("applyTo")
+        .and_then(|v| v.as_str())
         .map(ToOwned::to_owned);
     apply_to_to_paths(apply_to, &mut fm);
     render(fm, &doc.body)
