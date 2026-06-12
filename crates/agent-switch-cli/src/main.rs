@@ -8,7 +8,7 @@ use clap::{Args, Parser, Subcommand};
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "agent-switch",
+    name = "ags",
     version,
     about = "Synchronize canonical .agents files with coding agent native formats."
 )]
@@ -185,7 +185,7 @@ fn version_output(json_output: bool) -> Result<CommandOutput> {
             "build_date": option_env!("BUILD_DATE").unwrap_or("unknown"),
         }))?);
     } else {
-        out.push(format!("agent-switch {TOOL_VERSION}"));
+        out.push(format!("ags {TOOL_VERSION}"));
         out.push(format!(
             "commit: {}",
             option_env!("GIT_SHA").unwrap_or("unknown")

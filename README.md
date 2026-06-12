@@ -3,21 +3,21 @@
 Agent Switch is a zero-runtime-dependency Rust CLI for synchronizing a canonical `.agents/`
 directory with native coding-agent formats.
 
-The binary name is `agent-switch`.
+The binary name is `ags`.
 
 ## Commands
 
 ```bash
-agent-switch init
-agent-switch setup
-agent-switch setup --tool codex --prune
-agent-switch setup --check
-agent-switch sync
-agent-switch sync --check
-agent-switch sync --tool codex,copilot
-agent-switch doctor
-agent-switch mappings validate
-agent-switch version
+ags init
+ags setup
+ags setup --tool codex --prune
+ags setup --check
+ags sync
+ags sync --check
+ags sync --tool codex,copilot
+ags doctor
+ags mappings validate
+ags version
 ```
 
 Global options:
@@ -50,10 +50,10 @@ agents_dir: .agents
 manifest: .agents/.sync-manifest.json
 ```
 
-Run `agent-switch init` to create the default config, canonical directories, sample files,
+Run `ags init` to create the default config, canonical directories, sample files,
 and recommended `.gitignore` entries.
 
-Use `agent-switch setup --tool <tool> --prune` when switching tools and you want
+Use `ags setup --tool <tool> --prune` when switching tools and you want
 Agent Switch to remove links/copy fallbacks for tools that are no longer selected. Pruning
 is conservative: unmanaged real files and directories are skipped.
 
@@ -61,12 +61,12 @@ is conservative: unmanaged real files and directories are skipped.
 
 1. Add `.agent-switch.yaml` to the repo.
 2. Keep canonical files under `.agents/`.
-3. Run `agent-switch sync --check` in CI to detect drift.
+3. Run `ags sync --check` in CI to detect drift.
 4. Replace repo-local wrapper scripts with:
 
 ```bash
-agent-switch setup
-agent-switch sync
+ags setup
+ags sync
 ```
 
 The Rust CLI v1 intentionally does not provide an automatic
@@ -81,7 +81,7 @@ cargo build --release -p agent-switch-cli
 The release binary is:
 
 ```text
-target/release/agent-switch
+target/release/ags
 ```
 
 ## Test
