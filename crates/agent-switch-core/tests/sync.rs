@@ -1,6 +1,6 @@
 use std::{fs, path::Path};
 
-use agentstitch_core::{
+use agent_switch_core::{
     config::{self, Config},
     sync::{self, SyncOptions},
     ExitCode,
@@ -15,7 +15,7 @@ fn write(path: &Path, content: &str) {
 }
 
 fn fixture(root: &Path) -> Config {
-    config::write_default_config(&root.join(".agentstitch.yaml"), false).unwrap();
+    config::write_default_config(&root.join(".agent-switch.yaml"), false).unwrap();
     write(
         &root.join(".agents/agents/reviewer.md"),
         r#"---
@@ -69,6 +69,20 @@ Write focused tests.
 "#,
     );
     config::load_config(root, None).unwrap().0
+}
+
+#[test]
+fn legacy_agentstitch_config_is_still_loaded() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+    config::write_default_config(&root.join(".agentstitch.yaml"), false).unwrap();
+
+    let (_cfg, path) = config::load_config(root, None).unwrap();
+
+    assert_eq!(
+        path.file_name().and_then(|s| s.to_str()),
+        Some(".agentstitch.yaml")
+    );
 }
 
 #[test]

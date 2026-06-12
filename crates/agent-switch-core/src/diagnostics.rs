@@ -4,7 +4,7 @@ use anyhow::Result;
 use serde_json::json;
 
 use crate::{
-    config::{self, Config},
+    config::{self, Config, CONFIG_FILE, LEGACY_CONFIG_FILE},
     fs::{abs, repo_path},
     manifest,
     sync::{self, SyncOptions},
@@ -14,7 +14,7 @@ use crate::{
 pub fn doctor(root: &Path, cfg: Option<&Config>, json_output: bool) -> Result<CommandOutput> {
     let mut out = CommandOutput::default();
     let agents_exists = root.join(".agents").exists();
-    let config_exists = root.join(".agentstitch.yaml").exists();
+    let config_exists = root.join(CONFIG_FILE).exists() || root.join(LEGACY_CONFIG_FILE).exists();
     let manifest_ok = root
         .join(".agents/.sync-manifest.json")
         .exists()
@@ -38,9 +38,9 @@ pub fn doctor(root: &Path, cfg: Option<&Config>, json_output: bool) -> Result<Co
         out.push("warning: .agents does not exist");
     }
     if config_exists {
-        out.push("ok       .agentstitch.yaml exists");
+        out.push(format!("ok       {CONFIG_FILE} exists"));
     } else {
-        out.push("warning: .agentstitch.yaml does not exist");
+        out.push(format!("warning: {CONFIG_FILE} does not exist"));
     }
     if manifest_ok {
         out.push("ok       manifest parseable");

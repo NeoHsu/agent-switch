@@ -6,8 +6,10 @@ use toml_edit::{value, DocumentMut, Item, Table};
 
 use crate::fs::write_if_changed;
 
-const CODEX_START: &str = "# >>> agentstitch:mcp >>>";
-const CODEX_END: &str = "# <<< agentstitch:mcp <<<";
+const CODEX_START: &str = "# >>> agent-switch:mcp >>>";
+const CODEX_END: &str = "# <<< agent-switch:mcp <<<";
+const LEGACY_CODEX_START: &str = "# >>> agentstitch:mcp >>>";
+const LEGACY_CODEX_END: &str = "# <<< agentstitch:mcp <<<";
 
 pub fn merge_opencode(
     root: &Path,
@@ -125,7 +127,15 @@ fn render_codex_mcp_block(canonical: &Value) -> String {
 }
 
 fn replace_marker_block(existing: &str, block: &str) -> String {
-    let Some(start) = existing.find(CODEX_START) else {
+    let marker = existing
+        .find(CODEX_START)
+        .map(|start| (start, CODEX_END))
+        .or_else(|| {
+            existing
+                .find(LEGACY_CODEX_START)
+                .map(|start| (start, LEGACY_CODEX_END))
+        });
+    let Some((start, end_marker)) = marker else {
         if existing.trim().is_empty() {
             return block.to_string();
         }
@@ -134,13 +144,13 @@ fn replace_marker_block(existing: &str, block: &str) -> String {
         next.push_str(block);
         return next;
     };
-    let Some(end_rel) = existing[start..].find(CODEX_END) else {
+    let Some(end_rel) = existing[start..].find(end_marker) else {
         let mut next = existing[..start].trim_end().to_string();
         next.push_str("\n\n");
         next.push_str(block);
         return next;
     };
-    let end = start + end_rel + CODEX_END.len();
+    let end = start + end_rel + end_marker.len();
     let mut next = String::new();
     next.push_str(&existing[..start]);
     next.push_str(block.trim_end());

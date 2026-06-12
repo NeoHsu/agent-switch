@@ -1,7 +1,8 @@
 use std::{fs, path::Path};
 
-use agentstitch_core::{
+use agent_switch_core::{
     config::{self, Config},
+    init,
     manifest::{self, Manifest},
     setup::{self, SetupOptions},
     ExitCode,
@@ -16,7 +17,7 @@ fn write(path: &Path, content: &str) {
 }
 
 fn fixture(root: &Path) -> Config {
-    config::write_default_config(&root.join(".agentstitch.yaml"), false).unwrap();
+    config::write_default_config(&root.join(".agent-switch.yaml"), false).unwrap();
     fs::create_dir_all(root.join(".agents/skills")).unwrap();
     fs::create_dir_all(root.join(".agents/agents")).unwrap();
     fs::create_dir_all(root.join(".agents/commands")).unwrap();
@@ -24,6 +25,21 @@ fn fixture(root: &Path) -> Config {
     write(&root.join(".agents/mcp.json"), "{}\n");
     write(&root.join("AGENTS.md"), "# Agents\n");
     config::load_config(root, None).unwrap().0
+}
+
+#[test]
+fn init_writes_agent_switch_config() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+
+    let out = init::run(root, None, false).unwrap();
+
+    assert!(root.join(".agent-switch.yaml").exists());
+    assert!(!root.join(".agentstitch.yaml").exists());
+    assert!(out
+        .lines
+        .iter()
+        .any(|line| line == "created  .agent-switch.yaml"));
 }
 
 #[test]

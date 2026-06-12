@@ -7,6 +7,9 @@ use std::{
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 
+pub const CONFIG_FILE: &str = ".agent-switch.yaml";
+pub const LEGACY_CONFIG_FILE: &str = ".agentstitch.yaml";
+
 pub const SUPPORTED_TOOLS: &[&str] = &[
     "claude",
     "codex",
@@ -177,8 +180,12 @@ pub fn load_config(root: &Path, explicit: Option<&Path>) -> Result<(Config, Path
         } else {
             root.join(path)
         }
+    } else if root.join(CONFIG_FILE).exists() {
+        root.join(CONFIG_FILE)
+    } else if root.join(LEGACY_CONFIG_FILE).exists() {
+        root.join(LEGACY_CONFIG_FILE)
     } else {
-        root.join(".agentstitch.yaml")
+        root.join(CONFIG_FILE)
     };
     let content = fs::read_to_string(&path)
         .with_context(|| format!("error: failed to read config: {}", path.display()))?;
@@ -204,13 +211,14 @@ pub fn find_root(explicit: Option<&Path>) -> Result<PathBuf> {
     if let Some(root) = explicit {
         return Ok(root.canonicalize().unwrap_or_else(|_| root.to_path_buf()));
     }
-    if let Ok(root) = env::var("AGENTSTITCH_ROOT") {
+    if let Ok(root) = env::var("AGENT_SWITCH_ROOT").or_else(|_| env::var("AGENTSTITCH_ROOT")) {
         let path = PathBuf::from(root);
         return Ok(path.canonicalize().unwrap_or(path));
     }
     let mut dir = env::current_dir()?;
     loop {
-        if dir.join(".agentstitch.yaml").exists()
+        if dir.join(CONFIG_FILE).exists()
+            || dir.join(LEGACY_CONFIG_FILE).exists()
             || dir.join(".agents").exists()
             || dir.join(".git").exists()
         {
@@ -229,6 +237,7 @@ pub fn parse_tools(
     let value = cli_tool
         .or(cli_target)
         .map(str::to_owned)
+        .or_else(|| env::var("AGENT_SWITCH_TOOLS").ok())
         .or_else(|| env::var("AGENTSTITCH_TOOLS").ok());
     let Some(value) = value else {
         return Ok(None);

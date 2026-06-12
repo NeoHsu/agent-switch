@@ -3,17 +3,17 @@
 version = 4
 
 [[package]]
-name = "agentstitch-cli"
+name = "agent-switch-cli"
 version = "0.1.0"
 dependencies = [
- "agentstitch-core",
+ "agent-switch-core",
  "anyhow",
  "clap",
  "serde_json",
 ]
 
 [[package]]
-name = "agentstitch-core"
+name = "agent-switch-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",

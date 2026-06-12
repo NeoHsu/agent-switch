@@ -1,7 +1,7 @@
 [workspace]
 members = [
-  "crates/agentstitch-cli",
-  "crates/agentstitch-core",
+  "crates/agent-switch-cli",
+  "crates/agent-switch-core",
 ]
 resolver = "2"
 
@@ -11,7 +11,7 @@ edition = "2021"
 license = "MIT"
 
 [workspace.dependencies]
-agentstitch-core = { path = "crates/agentstitch-core" }
+agent-switch-core = { path = "crates/agent-switch-core" }
 anyhow = "1"
 camino = { version = "1", features = ["serde1"] }
 clap = { version = "4", features = ["derive", "env"] }

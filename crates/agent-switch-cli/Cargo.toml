@@ -1,15 +1,15 @@
 [package]
-name = "agentstitch-cli"
+name = "agent-switch-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "agentstitch"
+name = "agent-switch"
 path = "src/main.rs"
 
 [dependencies]
-agentstitch-core.workspace = true
+agent-switch-core.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 serde_json.workspace = true

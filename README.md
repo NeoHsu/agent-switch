@@ -1,23 +1,23 @@
-# AgentStitch
+# Agent Switch
 
-AgentStitch is a zero-runtime-dependency Rust CLI for synchronizing a canonical `.agents/`
+Agent Switch is a zero-runtime-dependency Rust CLI for synchronizing a canonical `.agents/`
 directory with native coding-agent formats.
 
-The binary name is `agentstitch`.
+The binary name is `agent-switch`.
 
 ## Commands
 
 ```bash
-agentstitch init
-agentstitch setup
-agentstitch setup --tool codex --prune
-agentstitch setup --check
-agentstitch sync
-agentstitch sync --check
-agentstitch sync --tool codex,copilot
-agentstitch doctor
-agentstitch mappings validate
-agentstitch version
+agent-switch init
+agent-switch setup
+agent-switch setup --tool codex --prune
+agent-switch setup --check
+agent-switch sync
+agent-switch sync --check
+agent-switch sync --tool codex,copilot
+agent-switch doctor
+agent-switch mappings validate
+agent-switch version
 ```
 
 Global options:
@@ -40,8 +40,9 @@ claude, codex, copilot, opencode, pi, antigravity
 
 ## Project Config
 
-AgentStitch v1 reads `.agentstitch.yaml` by default. It does not read
-`scripts/mappings.yaml`.
+Agent Switch v1 reads `.agent-switch.yaml` by default. It can still read an
+existing `.agentstitch.yaml` as a compatibility fallback, but new repos should use
+`.agent-switch.yaml`. It does not read `scripts/mappings.yaml`.
 
 ```yaml
 version: 1
@@ -49,38 +50,38 @@ agents_dir: .agents
 manifest: .agents/.sync-manifest.json
 ```
 
-Run `agentstitch init` to create the default config, canonical directories, sample files,
+Run `agent-switch init` to create the default config, canonical directories, sample files,
 and recommended `.gitignore` entries.
 
-Use `agentstitch setup --tool <tool> --prune` when switching tools and you want
-AgentStitch to remove links/copy fallbacks for tools that are no longer selected. Pruning
+Use `agent-switch setup --tool <tool> --prune` when switching tools and you want
+Agent Switch to remove links/copy fallbacks for tools that are no longer selected. Pruning
 is conservative: unmanaged real files and directories are skipped.
 
 ## Migration From Repo-Local Scripts
 
-1. Add `.agentstitch.yaml` to the repo.
+1. Add `.agent-switch.yaml` to the repo.
 2. Keep canonical files under `.agents/`.
-3. Run `agentstitch sync --check` in CI to detect drift.
+3. Run `agent-switch sync --check` in CI to detect drift.
 4. Replace repo-local wrapper scripts with:
 
 ```bash
-agentstitch setup
-agentstitch sync
+agent-switch setup
+agent-switch sync
 ```
 
 The Rust CLI v1 intentionally does not provide an automatic
-`scripts/mappings.yaml` to `.agentstitch.yaml` migration command.
+`scripts/mappings.yaml` to `.agent-switch.yaml` migration command.
 
 ## Build
 
 ```bash
-cargo build --release -p agentstitch-cli
+cargo build --release -p agent-switch-cli
 ```
 
 The release binary is:
 
 ```text
-target/release/agentstitch
+target/release/agent-switch
 ```
 
 ## Test

@@ -34,7 +34,7 @@ impl Default for ManifestMeta {
     fn default() -> Self {
         Self {
             version: 1,
-            tool: "agentstitch".into(),
+            tool: "agent-switch".into(),
             tool_version: TOOL_VERSION.into(),
         }
     }

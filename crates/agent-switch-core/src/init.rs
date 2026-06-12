@@ -2,10 +2,14 @@ use std::{fs, path::Path};
 
 use anyhow::Result;
 
-use crate::{config::write_default_config, fs::write_if_changed, mcp, CommandOutput};
+use crate::{
+    config::{write_default_config, CONFIG_FILE},
+    fs::write_if_changed,
+    mcp, CommandOutput,
+};
 
-const GITIGNORE_BLOCK: &str = r#"# >>> agentstitch >>>
-# AgentStitch runtime state
+const GITIGNORE_BLOCK: &str = r#"# >>> agent-switch >>>
+# Agent Switch runtime state
 .agents/.sync-manifest.json
 
 # Tool-specific links/copies and generated adapters
@@ -19,9 +23,9 @@ const GITIGNORE_BLOCK: &str = r#"# >>> agentstitch >>>
 .github/prompts/
 .github/instructions/
 
-# AgentStitch-managed merge target; remove this line if your team wants to commit OpenCode config
+# Agent Switch-managed merge target; remove this line if your team wants to commit OpenCode config
 opencode.json
-# <<< agentstitch <<<
+# <<< agent-switch <<<
 "#;
 
 pub fn run(root: &Path, tools: Option<&str>, force: bool) -> Result<CommandOutput> {
@@ -70,10 +74,10 @@ pub fn run(root: &Path, tools: Option<&str>, force: bool) -> Result<CommandOutpu
         &mut out,
     )?;
 
-    if write_default_config(&root.join(".agentstitch.yaml"), force)? {
-        out.push("created  .agentstitch.yaml");
+    if write_default_config(&root.join(CONFIG_FILE), force)? {
+        out.push(format!("created  {CONFIG_FILE}"));
     } else {
-        out.push("skipped  .agentstitch.yaml: already exists");
+        out.push(format!("skipped  {CONFIG_FILE}: already exists"));
     }
     update_gitignore(root, &mut out)?;
     if let Some(tools) = tools {
@@ -111,7 +115,7 @@ fn write_sample(
 fn update_gitignore(root: &Path, out: &mut CommandOutput) -> Result<()> {
     let path = root.join(".gitignore");
     let current = fs::read_to_string(&path).unwrap_or_default();
-    if current.contains("# >>> agentstitch >>>") {
+    if current.contains("# >>> agent-switch >>>") || current.contains("# >>> agentstitch >>>") {
         out.push("ok       .gitignore");
         return Ok(());
     }

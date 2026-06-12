@@ -1,4 +1,5 @@
 /target/
+/.agent-switch.yaml
 /.agentstitch.yaml
 /.agents/
 /.claude/

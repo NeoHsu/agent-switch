@@ -1,6 +1,6 @@
 use std::{env, path::PathBuf, process};
 
-use agentstitch_core::{
+use agent_switch_core::{
     config, diagnostics, init, setup, sync, CommandOutput, ExitCode, TOOL_VERSION,
 };
 use anyhow::Result;
@@ -8,14 +8,14 @@ use clap::{Args, Parser, Subcommand};
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "agentstitch",
+    name = "agent-switch",
     version,
     about = "Synchronize canonical .agents files with coding agent native formats."
 )]
 struct Cli {
-    #[arg(long, global = true, env = "AGENTSTITCH_ROOT")]
+    #[arg(long, global = true, env = "AGENT_SWITCH_ROOT")]
     root: Option<PathBuf>,
-    #[arg(long, global = true, env = "AGENTSTITCH_CONFIG")]
+    #[arg(long, global = true, env = "AGENT_SWITCH_CONFIG")]
     config: Option<PathBuf>,
     #[arg(long, global = true)]
     tool: Option<String>,
@@ -119,13 +119,16 @@ fn main() {
 fn run(cli: Cli) -> Result<CommandOutput> {
     let _ = (cli.verbose, cli.no_color);
     let root = config::find_root(cli.root.as_deref())?;
+    let config_path = cli
+        .config
+        .or_else(|| env::var_os("AGENTSTITCH_CONFIG").map(PathBuf::from));
     let tools = config::parse_tools(cli.tool.as_deref(), cli.target.as_deref())?;
     let tools_ref = tools.as_deref();
 
     let mut out = match cli.command {
         Commands::Init(args) => init::run(&root, args.tools.as_deref(), args.force)?,
         Commands::Setup(args) => {
-            let (cfg, _) = config::load_config(&root, cli.config.as_deref())?;
+            let (cfg, _) = config::load_config(&root, config_path.as_deref())?;
             setup::run(
                 &root,
                 &cfg,
@@ -139,7 +142,7 @@ fn run(cli: Cli) -> Result<CommandOutput> {
             )?
         }
         Commands::Sync(args) => {
-            let (cfg, _) = config::load_config(&root, cli.config.as_deref())?;
+            let (cfg, _) = config::load_config(&root, config_path.as_deref())?;
             sync::run(
                 &root,
                 &cfg,
@@ -152,14 +155,14 @@ fn run(cli: Cli) -> Result<CommandOutput> {
             )?
         }
         Commands::Doctor(args) => {
-            let cfg = config::load_config(&root, cli.config.as_deref())
+            let cfg = config::load_config(&root, config_path.as_deref())
                 .ok()
                 .map(|(cfg, _)| cfg);
             diagnostics::doctor(&root, cfg.as_ref(), args.json)?
         }
         Commands::Mappings(cmd) => match cmd.command {
             MappingsSubcommand::Validate(args) => {
-                let (cfg, _) = config::load_config(&root, cli.config.as_deref())?;
+                let (cfg, _) = config::load_config(&root, config_path.as_deref())?;
                 diagnostics::validate_mappings(&cfg, args.json)?
             }
         },
@@ -182,7 +185,7 @@ fn version_output(json_output: bool) -> Result<CommandOutput> {
             "build_date": option_env!("BUILD_DATE").unwrap_or("unknown"),
         }))?);
     } else {
-        out.push(format!("agentstitch {TOOL_VERSION}"));
+        out.push(format!("agent-switch {TOOL_VERSION}"));
         out.push(format!(
             "commit: {}",
             option_env!("GIT_SHA").unwrap_or("unknown")

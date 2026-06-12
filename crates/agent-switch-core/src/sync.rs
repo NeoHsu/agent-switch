@@ -67,7 +67,7 @@ pub fn run(
 
     if opts.check {
         if changed {
-            out.push("--check: drift detected; run `agentstitch sync`");
+            out.push("--check: drift detected; run `agent-switch sync`");
             out.exit = Some(ExitCode::Drift);
         } else {
             out.push("synced, no changes.");
@@ -289,7 +289,7 @@ fn sync_link_copies(
         let rel_target = relative_link(&link_abs, &target_abs);
         if is_fake_symlink(&link_abs, &rel_target, target) {
             out.push(format!(
-                "warning: {} is an unrestored git symlink placeholder; run `agentstitch setup`",
+                "warning: {} is an unrestored git symlink placeholder; run `agent-switch setup`",
                 repo_path(link_rel)
             ));
             continue;
