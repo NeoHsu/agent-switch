@@ -56,6 +56,17 @@ manifest: .agents/.sync-manifest.json
 Run `ags init` to create the default config, canonical directories, sample files,
 and recommended `.gitignore` entries.
 
+Symlinks can be declared as a simple `link: target` mapping or as an object with
+explicit tool ownership. Custom links without inferred or explicit ownership are
+kept when `--tool ... --prune` is used.
+
+```yaml
+symlinks:
+  CUSTOM.md:
+    to: .agents/custom.md
+    tools: [codex]
+```
+
 Use `ags setup --tool <tool> --prune` when switching tools and you want
 Agent Switch to remove links/copy fallbacks for tools that are no longer selected. Pruning
 is conservative: unmanaged real files and directories are skipped.
@@ -105,5 +116,6 @@ fields are fixed for scripts and CI machines.
 cargo test
 ```
 
-CI runs `cargo fmt --check`, `cargo clippy -- -D warnings`, and `cargo test`
-on Linux, macOS, and Windows.
+CI runs `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo audit`,
+and `cargo test` on Linux, macOS, and Windows. Tag pushes matching `v*` build
+release archives for Linux, macOS, and Windows.
