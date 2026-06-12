@@ -5,6 +5,9 @@ directory with native coding-agent formats.
 
 The binary name is `ags`.
 
+For maintainers, see [`docs/architecture.md`](docs/architecture.md) for the
+workspace layout, sync pipeline, manifest semantics, and extension points.
+
 ## Commands
 
 ```bash
@@ -31,7 +34,6 @@ Global options:
 --root <path>
 --config <path>
 --tool <list>
---target <list>
 --quiet
 ```
 
@@ -43,9 +45,8 @@ claude, codex, copilot, opencode, pi, antigravity
 
 ## Project Config
 
-Agent Switch v1 reads `.agent-switch.yaml` by default. It can still read an
-existing `.agentstitch.yaml` as a compatibility fallback, but new repos should use
-`.agent-switch.yaml`. It does not read `scripts/mappings.yaml`.
+Agent Switch v1 reads `.agent-switch.yaml` by default. It does not read
+`scripts/mappings.yaml`.
 
 ```yaml
 version: 1
@@ -54,7 +55,17 @@ manifest: .agents/.sync-manifest.json
 ```
 
 Run `ags init` to create the default config, canonical directories, sample files,
-and recommended `.gitignore` entries.
+and recommended `.gitignore` entries. Use `ags init --tools codex,copilot` to
+write a starter config filtered to only those tool mappings.
+
+Config paths are validated before any setup or sync work runs:
+
+- paths must be repository-relative;
+- paths must use forward slashes for portability;
+- absolute paths and `.` / `..` path components are rejected;
+- `generate` output directories must be unique;
+- use either `tool` or `tools` on a mapping, not both;
+- `tools` lists must be non-empty and contain no duplicates.
 
 Symlinks can be declared as a simple `link: target` mapping or as an object with
 explicit tool ownership. Custom links without inferred or explicit ownership are
@@ -70,6 +81,21 @@ symlinks:
 Use `ags setup --tool <tool> --prune` when switching tools and you want
 Agent Switch to remove links/copy fallbacks for tools that are no longer selected. Pruning
 is conservative: unmanaged real files and directories are skipped.
+
+## Cross-Platform Behavior
+
+Agent Switch is designed to run on Linux, macOS, and Windows.
+
+- Repository paths in output are normalized to forward slashes.
+- Text files are read as UTF-8 and tolerate a leading UTF-8 BOM.
+- Markdown frontmatter parsing tolerates CRLF line endings.
+- Unix platforms create symlinks for managed links.
+- Windows tries to create symlinks; directory links can fall back to junctions.
+- If a Windows file symlink cannot be created, Agent Switch falls back to a
+  managed plain-file copy so the tool remains usable without Developer Mode or
+  administrator privileges.
+- Generated files, manifests, and config writes use atomic replacement to reduce
+  the chance of partially written files.
 
 ## Migration From Repo-Local Scripts
 
@@ -88,6 +114,8 @@ The Rust CLI v1 intentionally does not provide an automatic
 
 ## Build
 
+The workspace declares a minimum supported Rust version (MSRV) of Rust 1.85.
+
 ```bash
 cargo build --release -p agent-switch-cli
 ```
@@ -97,6 +125,9 @@ The release binary is:
 ```text
 target/release/ags
 ```
+
+Release builds in CI use explicit target triples for Linux, macOS, and Windows
+so archive names match the binaries they contain.
 
 ## Sync Event Filtering and JSON Output
 
@@ -116,6 +147,7 @@ fields are fixed for scripts and CI machines.
 cargo test
 ```
 
-CI runs `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo audit`,
-and `cargo test` on Linux, macOS, and Windows. Tag pushes matching `v*` build
-release archives for Linux, macOS, and Windows.
+CI runs `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
+an MSRV `cargo check --workspace --all-targets`, `cargo audit`, and
+`cargo test --workspace` on Linux, macOS, and Windows. Tag pushes matching `v*`
+build release archives for Linux, macOS, and Windows.
