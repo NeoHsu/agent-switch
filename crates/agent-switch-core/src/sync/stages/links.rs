@@ -6,8 +6,8 @@ use crate::{
     manifest,
 };
 
-use crate::sync::stage::SyncStage;
 use crate::sync::SyncOptions;
+use crate::sync::stage::SyncStage;
 use crate::sync::{context::SyncContext, plan::SyncPlan, report::SyncReport};
 
 use super::super::event::SyncEvent;

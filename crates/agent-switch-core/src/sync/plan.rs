@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
 };
 
@@ -7,6 +7,7 @@ use anyhow::Result;
 use walkdir::WalkDir;
 
 use crate::{
+    Error,
     config::{self, Config, GenerateSpec},
     fs::{abs, repo_path},
     tool::Tool,
@@ -59,6 +60,8 @@ fn selected_specs(cfg: &Config, tools: Option<&[Tool]>) -> Vec<GenerateSpec> {
 
 fn build_jobs(root: &Path, specs: &[GenerateSpec]) -> Result<Vec<Job>> {
     let mut jobs = Vec::new();
+    let mut dest_sources = BTreeMap::<String, PathBuf>::new();
+
     for spec in specs {
         let from_abs = abs(root, &spec.from);
         if !from_abs.exists() {
@@ -89,10 +92,21 @@ fn build_jobs(root: &Path, specs: &[GenerateSpec]) -> Result<Vec<Job>> {
                 .unwrap_or_default();
             let mut dest_sub = rel_no_ext.clone();
             dest_sub.set_file_name(format!("{file_name}{suffix}"));
+            let src_rel = spec.from.join(rel_to_from);
+            let dest_rel = spec.to.join(dest_sub);
+            let dest_key = repo_path(&dest_rel);
+            if let Some(existing) = dest_sources.insert(dest_key.clone(), src_rel.clone()) {
+                return Err(Error::Config(format!(
+                    "generate output collision: {dest_key} would be produced by both {} and {}",
+                    repo_path(&existing),
+                    repo_path(&src_rel)
+                ))
+                .into());
+            }
             jobs.push(Job {
                 format: spec.format,
-                src_rel: spec.from.join(rel_to_from),
-                dest_rel: spec.to.join(dest_sub),
+                src_rel,
+                dest_rel,
             });
         }
     }

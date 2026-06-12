@@ -1,3 +1,5 @@
+use std::io;
+
 use anyhow::{Context, Result};
 
 use crate::{
@@ -5,8 +7,8 @@ use crate::{
     manifest::{self, GeneratedEntry},
 };
 
-use crate::sync::SyncOptions;
 use crate::sync::stage::SyncStage;
+use crate::sync::SyncOptions;
 use crate::sync::{context::SyncContext, plan::SyncPlan, report::SyncReport};
 
 use super::super::event::SyncEvent;
@@ -50,7 +52,11 @@ fn export_jobs(
         let src_hash = manifest::sha256_text(&source);
         let dest_key = repo_path(&job.dest_rel);
         let write_needed = if ctx.check {
-            !dest_abs.exists() || read_text(&dest_abs).unwrap_or_default() != generated
+            match read_text(&dest_abs) {
+                Ok(existing) => existing != generated,
+                Err(err) if err.kind() == io::ErrorKind::NotFound => true,
+                Err(err) => return Err(err.into()),
+            }
         } else {
             write_if_changed(&dest_abs, &generated)?
         };
