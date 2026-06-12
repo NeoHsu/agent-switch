@@ -4,11 +4,11 @@ use anyhow::Result;
 use serde_json::json;
 
 use crate::{
-    config::{self, Config, CONFIG_FILE},
+    CommandOutput, Error, ExitCode,
+    config::{self, CONFIG_FILE, Config},
     fs::{abs, repo_path},
     manifest,
     sync::{self, SyncOptions},
-    CommandOutput, Error, ExitCode,
 };
 
 pub fn doctor(root: &Path, cfg: Option<&Config>, json_output: bool) -> Result<CommandOutput> {

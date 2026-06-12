@@ -6,11 +6,11 @@ use std::{
 use anyhow::Result;
 
 use crate::{
+    CommandOutput, ExitCode,
     config::{self, Config},
     fs::{abs, is_fake_symlink, relative_link, remove_file_or_empty_dir, repo_path},
     manifest, sync,
     tool::Tool,
-    CommandOutput, ExitCode,
 };
 
 #[derive(Debug, Clone, Copy, Default)]

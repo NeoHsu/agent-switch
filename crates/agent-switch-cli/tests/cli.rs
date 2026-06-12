@@ -41,8 +41,10 @@ fn doctor_json_reports_invalid_config() {
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["config"], false);
     assert_eq!(report["config_path"], ".agent-switch.yaml");
-    assert!(report["config_error"]
-        .as_str()
-        .unwrap()
-        .contains("unsupported config version: 999"));
+    assert!(
+        report["config_error"]
+            .as_str()
+            .unwrap()
+            .contains("unsupported config version: 999")
+    );
 }

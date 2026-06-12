@@ -1,13 +1,13 @@
 use std::{io, path::Path};
 
 use anyhow::Result;
-use serde_json::{json, Value};
-use toml_edit::{value, DocumentMut, Item, Table};
+use serde_json::{Value, json};
+use toml_edit::{DocumentMut, Item, Table, value};
 
 use crate::{
+    Error,
     fs::{read_text, write_if_changed},
     tool::MergeFormat,
-    Error,
 };
 
 const CODEX_START: &str = "# >>> agent-switch:mcp >>>";

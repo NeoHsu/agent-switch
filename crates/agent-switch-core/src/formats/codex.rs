@@ -1,6 +1,6 @@
 use anyhow::Result;
 use noyalib::{Mapping, Value};
-use toml_edit::{value, DocumentMut, InlineTable, Item, Table};
+use toml_edit::{DocumentMut, InlineTable, Item, Table, value};
 
 use super::markdown::{self, render, set_string};
 

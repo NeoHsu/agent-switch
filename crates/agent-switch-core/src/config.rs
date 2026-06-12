@@ -9,9 +9,9 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    Error,
     fs::{atomic_write, read_text, repo_path},
     tool::{self, Format, MergeFormat, Tool},
-    Error,
 };
 
 pub const CONFIG_FILE: &str = ".agent-switch.yaml";

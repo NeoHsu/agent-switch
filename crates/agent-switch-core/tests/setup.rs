@@ -1,12 +1,12 @@
 use std::{fs, path::Path};
 
 use agent_switch_core::{
+    ExitCode,
     config::{self, Config, SymlinkDetail, SymlinkSpec},
     diagnostics, init,
     manifest::{self, Manifest},
     setup::{self, SetupOptions},
     tool::Tool,
-    ExitCode,
 };
 use tempfile::tempdir;
 
@@ -58,10 +58,11 @@ fn init_writes_agent_switch_config() {
     let out = init::run(root, None, false).unwrap();
 
     assert!(root.join(".agent-switch.yaml").exists());
-    assert!(out
-        .lines
-        .iter()
-        .any(|line| line == "created  .agent-switch.yaml"));
+    assert!(
+        out.lines
+            .iter()
+            .any(|line| line == "created  .agent-switch.yaml")
+    );
 }
 
 #[test]
@@ -72,10 +73,11 @@ fn init_with_tools_filters_default_mappings() {
     let out = init::run(root, Some("codex"), false).unwrap();
     let cfg = config::load_config(root, None).unwrap().0;
 
-    assert!(out
-        .lines
-        .iter()
-        .any(|line| line == "ok       initialized tools: codex"));
+    assert!(
+        out.lines
+            .iter()
+            .any(|line| line == "ok       initialized tools: codex")
+    );
     assert!(cfg.symlinks.is_empty());
     assert_eq!(
         cfg.generate.keys().map(String::as_str).collect::<Vec<_>>(),
@@ -192,10 +194,11 @@ agents_dir: custom-agents
 
     let out = diagnostics::doctor(root, Some(&cfg), false).unwrap();
 
-    assert!(out
-        .lines
-        .iter()
-        .any(|line| line == "ok       custom-agents exists"));
+    assert!(
+        out.lines
+            .iter()
+            .any(|line| line == "ok       custom-agents exists")
+    );
 }
 
 #[test]
@@ -255,10 +258,11 @@ fn setup_prune_removes_links_for_unselected_tools() {
     )
     .unwrap();
 
-    assert!(out
-        .lines
-        .iter()
-        .any(|line| line == "removed: .copilot/mcp-config.json"));
+    assert!(
+        out.lines
+            .iter()
+            .any(|line| line == "removed: .copilot/mcp-config.json")
+    );
     assert!(out.lines.iter().any(|line| line == "removed: .pi/mcp.json"));
     assert_absent(&root.join(".copilot/mcp-config.json"));
     assert_absent(&root.join(".pi/mcp.json"));
@@ -401,10 +405,11 @@ fn setup_prune_removes_manifest_tracked_copy_fallback() {
     )
     .unwrap();
 
-    assert!(out
-        .lines
-        .iter()
-        .any(|line| line == "removed: .copilot/mcp-config.json"));
+    assert!(
+        out.lines
+            .iter()
+            .any(|line| line == "removed: .copilot/mcp-config.json")
+    );
     assert_absent(&root.join(".copilot/mcp-config.json"));
     let next_manifest = manifest::load(&root.join(".agents/.sync-manifest.json")).unwrap();
     assert!(!next_manifest.links.contains_key(".copilot/mcp-config.json"));

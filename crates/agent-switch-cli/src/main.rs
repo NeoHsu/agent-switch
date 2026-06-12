@@ -1,7 +1,7 @@
 use std::{path::PathBuf, process};
 
 use agent_switch_core::{
-    config, diagnostics, init, setup, sync, CommandOutput, Error, ExitCode, TOOL_VERSION,
+    CommandOutput, Error, ExitCode, TOOL_VERSION, config, diagnostics, init, setup, sync,
 };
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};

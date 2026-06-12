@@ -7,11 +7,11 @@ use std::{
 use anyhow::Result;
 
 use crate::{
-    config::{self, write_config, Config, CONFIG_FILE},
+    CommandOutput,
+    config::{self, CONFIG_FILE, Config, write_config},
     fs::write_if_changed,
     mcp,
     tool::Tool,
-    CommandOutput,
 };
 
 const GITIGNORE_BLOCK: &str = r#"# >>> agent-switch >>>
