@@ -1,7 +1,7 @@
 use std::{
-    collections::BTreeMap,
-    env, fs,
-    path::{Path, PathBuf},
+    collections::{BTreeMap, BTreeSet},
+    env,
+    path::{Component, Path, PathBuf},
     str::FromStr,
 };
 
@@ -9,13 +9,12 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    fs::read_text,
+    fs::{atomic_write, read_text, repo_path},
     tool::{self, Format, MergeFormat, Tool},
     Error,
 };
 
 pub const CONFIG_FILE: &str = ".agent-switch.yaml";
-pub const LEGACY_CONFIG_FILE: &str = ".agentstitch.yaml";
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Config {
@@ -41,9 +40,9 @@ pub struct GenerateSpec {
     pub suffix: Option<String>,
     #[serde(default)]
     pub recursive: bool,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool: Option<Tool>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<Tool>>,
 }
 
@@ -62,11 +61,10 @@ pub enum SymlinkSpec {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SymlinkDetail {
-    #[serde(alias = "target")]
     pub to: PathBuf,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool: Option<Tool>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<Tool>>,
 }
 
@@ -94,39 +92,16 @@ impl SymlinkSpec {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MergeSpec {
     pub to: PathBuf,
-    /// Explicit merge format. When absent, format is inferred from the spec id
-    /// and `to` path for backward compatibility with existing configs.
+    pub format: MergeFormat,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub format: Option<MergeFormat>,
-    #[serde(default)]
     pub tool: Option<Tool>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<Tool>>,
 }
 
 impl MergeSpec {
-    /// Resolves the merge format: explicit field takes precedence, then falls
-    /// back to heuristic inference from the spec id and `to` path.
-    pub fn resolve_format(&self, id: &str) -> Option<MergeFormat> {
-        self.format.or_else(|| {
-            if id.starts_with("codex-") || self.to.starts_with(".codex") {
-                Some(MergeFormat::Codex)
-            } else if id.starts_with("opencode-") || self.to.as_path() == Path::new("opencode.json")
-            {
-                Some(MergeFormat::Opencode)
-            } else {
-                None
-            }
-        })
-    }
-
-    pub fn effective_tools(&self, id: &str) -> Vec<Tool> {
-        explicit_tools(self.tool, self.tools.as_deref()).unwrap_or_else(|| {
-            self.resolve_format(id)
-                .map(MergeFormat::tool)
-                .into_iter()
-                .collect()
-        })
+    pub fn effective_tools(&self) -> Vec<Tool> {
+        explicit_tools(self.tool, self.tools.as_deref()).unwrap_or_else(|| vec![self.format.tool()])
     }
 }
 
@@ -203,9 +178,9 @@ const DEFAULT_GENERATE: &[(&str, &str, &str, Format, &str, bool)] = &[
     ),
 ];
 
-const DEFAULT_MERGE: &[(&str, &str)] = &[
-    ("opencode-config", "opencode.json"),
-    ("codex-config", ".codex/config.toml"),
+const DEFAULT_MERGE: &[(&str, &str, MergeFormat)] = &[
+    ("opencode-config", "opencode.json", MergeFormat::Opencode),
+    ("codex-config", ".codex/config.toml", MergeFormat::Codex),
 ];
 
 impl Default for Config {
@@ -233,12 +208,12 @@ impl Default for Config {
             .collect();
         let merge = DEFAULT_MERGE
             .iter()
-            .map(|&(id, to)| {
+            .map(|&(id, to, format)| {
                 (
                     id.to_string(),
                     MergeSpec {
                         to: to.into(),
-                        format: None,
+                        format,
                         tool: None,
                         tools: None,
                     },
@@ -257,20 +232,20 @@ impl Default for Config {
     }
 }
 
-pub fn load_config(root: &Path, explicit: Option<&Path>) -> Result<(Config, PathBuf)> {
-    let path = if let Some(path) = explicit {
+pub fn resolve_config_path(root: &Path, explicit: Option<&Path>) -> PathBuf {
+    if let Some(path) = explicit {
         if path.is_absolute() {
             path.to_path_buf()
         } else {
             root.join(path)
         }
-    } else if root.join(CONFIG_FILE).exists() {
-        root.join(CONFIG_FILE)
-    } else if root.join(LEGACY_CONFIG_FILE).exists() {
-        root.join(LEGACY_CONFIG_FILE)
     } else {
         root.join(CONFIG_FILE)
-    };
+    }
+}
+
+pub fn load_config(root: &Path, explicit: Option<&Path>) -> Result<(Config, PathBuf)> {
+    let path = resolve_config_path(root, explicit);
     let content = read_text(&path)
         .map_err(|err| Error::Config(format!("failed to read config {}: {err}", path.display())))?;
     let cfg: Config = noyalib::from_str(&content)
@@ -279,16 +254,17 @@ pub fn load_config(root: &Path, explicit: Option<&Path>) -> Result<(Config, Path
     Ok((cfg, path))
 }
 
-pub fn write_default_config(path: &Path, force: bool) -> Result<bool> {
+pub fn write_config(path: &Path, cfg: &Config, force: bool) -> Result<bool> {
     if path.exists() && !force {
         return Ok(false);
     }
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let text = noyalib::to_string(&Config::default())?;
-    fs::write(path, text)?;
+    let text = noyalib::to_string(cfg)?;
+    atomic_write(path, text.as_bytes())?;
     Ok(true)
+}
+
+pub fn write_default_config(path: &Path, force: bool) -> Result<bool> {
+    write_config(path, &Config::default(), force)
 }
 
 pub fn find_root(explicit: Option<&Path>) -> Result<PathBuf> {
@@ -298,7 +274,6 @@ pub fn find_root(explicit: Option<&Path>) -> Result<PathBuf> {
     let mut dir = env::current_dir()?;
     loop {
         if dir.join(CONFIG_FILE).exists()
-            || dir.join(LEGACY_CONFIG_FILE).exists()
             || dir.join(".agents").exists()
             || dir.join(".git").exists()
         {
@@ -329,12 +304,147 @@ pub fn validate_config(cfg: &Config) -> Result<()> {
             Error::Unsupported(format!("unsupported config version: {}", cfg.version)).into(),
         );
     }
-    for (id, spec) in &cfg.merge {
-        if spec.resolve_format(id).is_none() {
+
+    validate_repo_path("agents_dir", &cfg.agents_dir)?;
+    validate_repo_path("manifest", &cfg.manifest)?;
+
+    let mut generate_outputs = BTreeSet::new();
+    for (id, spec) in &cfg.generate {
+        validate_id("generate spec", id)?;
+        validate_repo_path(&format!("generate spec '{id}' from"), &spec.from)?;
+        validate_repo_path(&format!("generate spec '{id}' to"), &spec.to)?;
+        validate_tool_selection(
+            &format!("generate spec '{id}'"),
+            spec.tool,
+            spec.tools.as_deref(),
+        )?;
+        if let Some(suffix) = &spec.suffix {
+            validate_suffix(&format!("generate spec '{id}' suffix"), suffix)?;
+        }
+        let output = repo_path(&spec.to);
+        if !generate_outputs.insert(output.clone()) {
             return Err(Error::Config(format!(
-                "merge spec '{id}': cannot determine format; set an explicit `format:` field (supported: opencode, codex)"
+                "generate spec '{id}': duplicate output directory: {output}"
             ))
             .into());
+        }
+    }
+
+    for (link, spec) in &cfg.symlinks {
+        let link_path = Path::new(link);
+        validate_repo_path(&format!("symlink '{link}' path"), link_path)?;
+        validate_repo_path(&format!("symlink '{link}' target"), spec.target())?;
+        if repo_path(link_path) == repo_path(spec.target()) {
+            return Err(Error::Config(format!(
+                "symlink '{link}': link path and target must be different"
+            ))
+            .into());
+        }
+        if let SymlinkSpec::Detailed(detail) = spec {
+            validate_tool_selection(
+                &format!("symlink '{link}'"),
+                detail.tool,
+                detail.tools.as_deref(),
+            )?;
+        }
+    }
+
+    for (id, spec) in &cfg.merge {
+        validate_id("merge spec", id)?;
+        validate_repo_path(&format!("merge spec '{id}' to"), &spec.to)?;
+        validate_tool_selection(
+            &format!("merge spec '{id}'"),
+            spec.tool,
+            spec.tools.as_deref(),
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_id(kind: &str, id: &str) -> Result<()> {
+    if id.trim().is_empty() {
+        return Err(Error::Config(format!("{kind} id cannot be empty")).into());
+    }
+    Ok(())
+}
+
+fn validate_repo_path(label: &str, path: &Path) -> Result<()> {
+    if path.as_os_str().is_empty() {
+        return Err(Error::Config(format!("{label}: path cannot be empty")).into());
+    }
+    if path.is_absolute() {
+        return Err(Error::Config(format!(
+            "{label}: path must be repository-relative: {}",
+            path.display()
+        ))
+        .into());
+    }
+    let raw = path.to_string_lossy();
+    if raw.contains('\\') {
+        return Err(Error::Config(format!(
+            "{label}: use forward slashes for portable paths: {}",
+            path.display()
+        ))
+        .into());
+    }
+    for component in path.components() {
+        match component {
+            Component::Normal(_) => {}
+            Component::CurDir => {
+                return Err(Error::Config(format!(
+                    "{label}: path cannot contain `.` components: {}",
+                    path.display()
+                ))
+                .into());
+            }
+            Component::ParentDir => {
+                return Err(Error::Config(format!(
+                    "{label}: path cannot contain `..` components: {}",
+                    path.display()
+                ))
+                .into());
+            }
+            Component::Prefix(_) | Component::RootDir => {
+                return Err(Error::Config(format!(
+                    "{label}: path must be repository-relative: {}",
+                    path.display()
+                ))
+                .into());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_suffix(label: &str, suffix: &str) -> Result<()> {
+    if suffix.contains('/') || suffix.contains('\\') {
+        return Err(Error::Config(format!(
+            "{label}: suffix must be a file-name suffix, not a path: {suffix}"
+        ))
+        .into());
+    }
+    Ok(())
+}
+
+fn validate_tool_selection(label: &str, tool: Option<Tool>, tools: Option<&[Tool]>) -> Result<()> {
+    if tool.is_some() && tools.is_some() {
+        return Err(
+            Error::Config(format!("{label}: use either `tool` or `tools`, not both")).into(),
+        );
+    }
+    if let Some(tools) = tools {
+        if tools.is_empty() {
+            return Err(
+                Error::Config(format!("{label}: `tools` must contain at least one tool")).into(),
+            );
+        }
+        let mut seen = BTreeSet::new();
+        for tool in tools {
+            if !seen.insert(*tool) {
+                return Err(
+                    Error::Config(format!("{label}: duplicate tool `{tool}` in `tools`")).into(),
+                );
+            }
         }
     }
     Ok(())
@@ -344,8 +454,8 @@ pub fn generate_selected(spec: &GenerateSpec, filter: Option<&[Tool]>) -> bool {
     selected(&spec.effective_tools(), filter)
 }
 
-pub fn merge_selected(id: &str, spec: &MergeSpec, filter: Option<&[Tool]>) -> bool {
-    selected(&spec.effective_tools(id), filter)
+pub fn merge_selected(_id: &str, spec: &MergeSpec, filter: Option<&[Tool]>) -> bool {
+    selected(&spec.effective_tools(), filter)
 }
 
 pub fn symlink_selected(link: &str, spec: &SymlinkSpec, filter: Option<&[Tool]>) -> bool {

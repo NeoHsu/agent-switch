@@ -7,10 +7,11 @@ use std::{
 use anyhow::Result;
 
 use crate::{
-    CommandOutput,
-    config::{CONFIG_FILE, Config, write_default_config},
+    config::{self, write_config, Config, CONFIG_FILE},
     fs::write_if_changed,
     mcp,
+    tool::Tool,
+    CommandOutput,
 };
 
 const GITIGNORE_BLOCK: &str = r#"# >>> agent-switch >>>
@@ -34,13 +35,17 @@ opencode.json
 "#;
 
 pub fn run(root: &Path, tools: Option<&str>, force: bool) -> Result<CommandOutput> {
-    let cfg = Config::default();
+    let selected_tools = tools.map(config::parse_tools).transpose()?;
+    let cfg = filtered_default_config(selected_tools.as_deref());
     let agents_dir = root.join(&cfg.agents_dir);
     let mut out = CommandOutput::default();
 
-    // Derive directories to create from generate spec source paths (unique,
-    // sorted), plus the example-skill directory which has no generate spec.
+    // Derive directories to create from selected generate source paths and
+    // always create the canonical directories used by built-in symlinks.
     let mut dirs: BTreeSet<PathBuf> = cfg.generate.values().map(|s| root.join(&s.from)).collect();
+    dirs.insert(agents_dir.join("agents"));
+    dirs.insert(agents_dir.join("commands"));
+    dirs.insert(agents_dir.join("rules"));
     dirs.insert(agents_dir.join("skills").join("example-skill"));
     for dir in &dirs {
         create_dir(root, dir, &mut out)?;
@@ -75,7 +80,7 @@ pub fn run(root: &Path, tools: Option<&str>, force: bool) -> Result<CommandOutpu
         &mut out,
     )?;
 
-    if write_default_config(&root.join(CONFIG_FILE), force)? {
+    if write_config(&root.join(CONFIG_FILE), &cfg, force)? {
         out.push(format!("created  {CONFIG_FILE}"));
     } else {
         out.push(format!("skipped  {CONFIG_FILE}: already exists"));
@@ -113,10 +118,27 @@ fn write_sample(
     Ok(())
 }
 
+fn filtered_default_config(tools: Option<&[Tool]>) -> Config {
+    let mut cfg = Config::default();
+    if let Some(tools) = tools {
+        cfg.symlinks
+            .retain(|link, spec| config::symlink_selected(link, spec, Some(tools)));
+        cfg.generate
+            .retain(|_, spec| config::generate_selected(spec, Some(tools)));
+        cfg.merge
+            .retain(|id, spec| config::merge_selected(id, spec, Some(tools)));
+    }
+    cfg
+}
+
 fn update_gitignore(root: &Path, out: &mut CommandOutput) -> Result<()> {
     let path = root.join(".gitignore");
-    let current = fs::read_to_string(&path).unwrap_or_default();
-    if current.contains("# >>> agent-switch >>>") || current.contains("# >>> agentstitch >>>") {
+    let current = match fs::read_to_string(&path) {
+        Ok(current) => current,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(err) => return Err(err.into()),
+    };
+    if current.contains("# >>> agent-switch >>>") {
         out.push("ok       .gitignore");
         return Ok(());
     }
@@ -126,7 +148,7 @@ fn update_gitignore(root: &Path, out: &mut CommandOutput) -> Result<()> {
     }
     next.push_str(GITIGNORE_BLOCK);
     next.push('\n');
-    fs::write(path, next)?;
+    write_if_changed(&path, &next)?;
     out.push("updated  .gitignore");
     Ok(())
 }

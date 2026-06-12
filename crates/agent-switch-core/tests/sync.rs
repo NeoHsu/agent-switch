@@ -75,20 +75,6 @@ Write focused tests.
 }
 
 #[test]
-fn legacy_agentstitch_config_is_still_loaded() {
-    let temp = tempdir().unwrap();
-    let root = temp.path();
-    config::write_default_config(&root.join(".agentstitch.yaml"), false).unwrap();
-
-    let (_cfg, path) = config::load_config(root, None).unwrap();
-
-    assert_eq!(
-        path.file_name().and_then(|s| s.to_str()),
-        Some(".agentstitch.yaml")
-    );
-}
-
-#[test]
 fn full_sync_generates_outputs_and_check_passes() {
     let temp = tempdir().unwrap();
     let root = temp.path();

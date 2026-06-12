@@ -36,10 +36,7 @@ fn merge_configs(ctx: &SyncContext, report: &mut SyncReport) -> Result<bool> {
             continue;
         }
         let target = ctx.abs(&spec.to);
-        let did_change = match spec.resolve_format(id) {
-            Some(format) => mcp::merge(format, &canonical_mcp, &target, ctx.check)?,
-            None => false,
-        };
+        let did_change = mcp::merge(spec.format, &canonical_mcp, &target, ctx.check)?;
         if did_change {
             changed = true;
             report.push(SyncEvent::Merged {

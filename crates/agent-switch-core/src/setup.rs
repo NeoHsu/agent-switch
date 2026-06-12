@@ -71,6 +71,9 @@ pub fn run(
         }
 
         if link_abs.exists() || link_abs.is_symlink() {
+            if opts.check {
+                drift = true;
+            }
             if opts.force && link_abs.is_symlink() {
                 drift = true;
                 if !opts.check {

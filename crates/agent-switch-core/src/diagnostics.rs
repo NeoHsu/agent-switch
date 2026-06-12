@@ -4,20 +4,23 @@ use anyhow::Result;
 use serde_json::json;
 
 use crate::{
-    config::{self, Config, CONFIG_FILE, LEGACY_CONFIG_FILE},
+    config::{self, Config, CONFIG_FILE},
     fs::{abs, repo_path},
     manifest,
     sync::{self, SyncOptions},
-    CommandOutput, ExitCode,
+    CommandOutput, Error, ExitCode,
 };
 
 pub fn doctor(root: &Path, cfg: Option<&Config>, json_output: bool) -> Result<CommandOutput> {
     let mut out = CommandOutput::default();
-    let agents_exists = root.join(".agents").exists();
-    let config_exists = root.join(CONFIG_FILE).exists() || root.join(LEGACY_CONFIG_FILE).exists();
+    let agents_dir = cfg
+        .map(|c| c.agents_dir.as_path())
+        .unwrap_or_else(|| Path::new(".agents"));
+    let agents_exists = abs(root, agents_dir).exists();
+    let config_exists = root.join(CONFIG_FILE).exists();
     let manifest_path = cfg
         .map(|c| abs(root, &c.manifest))
-        .unwrap_or_else(|| root.join(".agents/.sync-manifest.json"));
+        .unwrap_or_else(|| root.join(agents_dir).join(".sync-manifest.json"));
     let manifest_ok = if manifest_path.exists() {
         manifest::load(&manifest_path).is_ok()
     } else {
@@ -28,6 +31,7 @@ pub fn doctor(root: &Path, cfg: Option<&Config>, json_output: bool) -> Result<Co
         out.push(serde_json::to_string_pretty(&json!({
             "root": root.display().to_string(),
             "agents_dir": agents_exists,
+            "agents_dir_path": repo_path(agents_dir),
             "config": config_exists,
             "manifest": manifest_ok,
         }))?);
@@ -35,10 +39,11 @@ pub fn doctor(root: &Path, cfg: Option<&Config>, json_output: bool) -> Result<Co
     }
 
     out.push(format!("ok       root: {}", root.display()));
+    let agents_dir_display = repo_path(agents_dir);
     if agents_exists {
-        out.push("ok       .agents exists");
+        out.push(format!("ok       {agents_dir_display} exists"));
     } else {
-        out.push("warning: .agents does not exist");
+        out.push(format!("warning: {agents_dir_display} does not exist"));
     }
     if config_exists {
         out.push(format!("ok       {CONFIG_FILE} exists"));
@@ -78,6 +83,47 @@ pub fn doctor(root: &Path, cfg: Option<&Config>, json_output: bool) -> Result<Co
         }
     }
     Ok(out)
+}
+
+pub fn doctor_config_error(
+    root: &Path,
+    config_path: &Path,
+    err: &anyhow::Error,
+    json_output: bool,
+) -> Result<CommandOutput> {
+    let mut out = CommandOutput {
+        exit: Some(exit_for_config_error(err)),
+        ..CommandOutput::default()
+    };
+    let config_path = display_path(root, config_path);
+    let error = err.to_string();
+
+    if json_output {
+        out.push(serde_json::to_string_pretty(&json!({
+            "root": root.display().to_string(),
+            "config": false,
+            "config_path": config_path,
+            "config_error": error,
+        }))?);
+    } else {
+        out.push(format!("ok       root: {}", root.display()));
+        out.push(format!("error:   {config_path}: {error}"));
+    }
+
+    Ok(out)
+}
+
+fn exit_for_config_error(err: &anyhow::Error) -> ExitCode {
+    match err.downcast_ref::<Error>() {
+        Some(Error::Unsupported(_)) => ExitCode::Unsupported,
+        Some(Error::Config(_)) | None => ExitCode::Config,
+    }
+}
+
+fn display_path(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .map(repo_path)
+        .unwrap_or_else(|_| path.display().to_string())
 }
 
 pub fn validate_mappings(cfg: &Config, json_output: bool) -> Result<CommandOutput> {

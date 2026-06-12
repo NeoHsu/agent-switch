@@ -1,9 +1,15 @@
 use std::{
-    fs, io,
+    ffi::{OsStr, OsString},
+    fs::{self, OpenOptions},
+    io::{self, Write},
     path::{Path, PathBuf},
+    process,
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 use anyhow::Result;
+
+static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 use pathdiff::diff_paths;
 
 pub fn repo_path(path: &Path) -> String {
@@ -34,14 +40,99 @@ pub fn read_text(path: &Path) -> io::Result<String> {
 }
 
 pub fn write_if_changed(path: &Path, content: &str) -> Result<bool> {
-    if path.exists() && fs::read(path).is_ok_and(|bytes| bytes == content.as_bytes()) {
-        return Ok(false);
+    match fs::read(path) {
+        Ok(bytes) if bytes == content.as_bytes() => Ok(false),
+        Ok(_) => {
+            atomic_write(path, content.as_bytes())?;
+            Ok(true)
+        }
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            atomic_write(path, content.as_bytes())?;
+            Ok(true)
+        }
+        Err(err) => Err(err.into()),
     }
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+}
+
+pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent)?;
+
+    let file_name = path.file_name().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "cannot write to path without a file name: {}",
+                path.display()
+            ),
+        )
+    })?;
+
+    let mut last_collision = None;
+    for _ in 0..16 {
+        let temp_path = next_temp_path(parent, file_name);
+        let mut file = match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp_path)
+        {
+            Ok(file) => file,
+            Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {
+                last_collision = Some(err);
+                continue;
+            }
+            Err(err) => return Err(err.into()),
+        };
+
+        if let Err(err) = file.write_all(bytes).and_then(|()| file.sync_all()) {
+            let _ = fs::remove_file(&temp_path);
+            return Err(err.into());
+        }
+        drop(file);
+
+        if let Err(err) = replace_file(&temp_path, path) {
+            let _ = fs::remove_file(&temp_path);
+            return Err(err.into());
+        }
+        return Ok(());
     }
-    fs::write(path, content)?;
-    Ok(true)
+
+    Err(last_collision
+        .unwrap_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "failed to allocate temporary file name",
+            )
+        })
+        .into())
+}
+
+fn next_temp_path(parent: &Path, file_name: &OsStr) -> PathBuf {
+    let counter = TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let mut temp_name = OsString::from(".");
+    temp_name.push(file_name);
+    temp_name.push(format!(".{}.{}.tmp", process::id(), counter));
+    parent.join(temp_name)
+}
+
+#[cfg(windows)]
+fn replace_file(temp_path: &Path, dest: &Path) -> io::Result<()> {
+    match fs::rename(temp_path, dest) {
+        Ok(()) => Ok(()),
+        Err(_) if dest.is_file() || dest.is_symlink() => {
+            fs::remove_file(dest)?;
+            fs::rename(temp_path, dest)
+        }
+        Err(err) => Err(err),
+    }
+}
+
+#[cfg(not(windows))]
+fn replace_file(temp_path: &Path, dest: &Path) -> io::Result<()> {
+    fs::rename(temp_path, dest)
 }
 
 pub fn relative_link(from_link_path: &Path, target: &Path) -> PathBuf {

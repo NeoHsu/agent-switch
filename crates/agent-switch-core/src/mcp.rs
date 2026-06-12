@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{io, path::Path};
 
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -12,8 +12,6 @@ use crate::{
 
 const CODEX_START: &str = "# >>> agent-switch:mcp >>>";
 const CODEX_END: &str = "# <<< agent-switch:mcp <<<";
-const LEGACY_CODEX_START: &str = "# >>> agentstitch:mcp >>>";
-const LEGACY_CODEX_END: &str = "# <<< agentstitch:mcp <<<";
 
 pub const EMPTY_MCP: &str = "{\n  \"mcpServers\": {}\n}\n";
 
@@ -29,7 +27,7 @@ pub fn merge(
     }
 }
 
-pub fn merge_opencode(canonical_mcp: &Path, target: &Path, check: bool) -> Result<bool> {
+fn merge_opencode(canonical_mcp: &Path, target: &Path, check: bool) -> Result<bool> {
     if !canonical_mcp.exists() {
         return Ok(false);
     }
@@ -48,7 +46,7 @@ pub fn merge_opencode(canonical_mcp: &Path, target: &Path, check: bool) -> Resul
     obj.insert("mcp".into(), convert_opencode_mcp(&canonical));
     obj.entry("instructions").or_insert(json!([]));
     let text = format!("{}\n", serde_json::to_string_pretty(&target_json)?);
-    if target.exists() && read_text(target).unwrap_or_default() == text {
+    if target.exists() && read_existing_text(target)? == text {
         return Ok(false);
     }
     if !check {
@@ -57,13 +55,13 @@ pub fn merge_opencode(canonical_mcp: &Path, target: &Path, check: bool) -> Resul
     Ok(true)
 }
 
-pub fn merge_codex(canonical_mcp: &Path, target: &Path, check: bool) -> Result<bool> {
+fn merge_codex(canonical_mcp: &Path, target: &Path, check: bool) -> Result<bool> {
     if !canonical_mcp.exists() {
         return Ok(false);
     }
     let canonical: Value = serde_json::from_str(&read_text(canonical_mcp)?)?;
     let block = render_codex_mcp_block(&canonical);
-    let existing = read_text(target).unwrap_or_default();
+    let existing = read_existing_text(target)?;
     let next = replace_marker_block(&existing, &block);
     if existing == next {
         return Ok(false);
@@ -72,6 +70,14 @@ pub fn merge_codex(canonical_mcp: &Path, target: &Path, check: bool) -> Result<b
         write_if_changed(target, &next)?;
     }
     Ok(true)
+}
+
+fn read_existing_text(path: &Path) -> Result<String> {
+    match read_text(path) {
+        Ok(text) => Ok(text),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(String::new()),
+        Err(err) => Err(err.into()),
+    }
 }
 
 fn convert_opencode_mcp(canonical: &Value) -> Value {
@@ -144,14 +150,7 @@ fn render_codex_mcp_block(canonical: &Value) -> String {
 }
 
 fn replace_marker_block(existing: &str, block: &str) -> String {
-    let marker = existing
-        .find(CODEX_START)
-        .map(|start| (start, CODEX_END))
-        .or_else(|| {
-            existing
-                .find(LEGACY_CODEX_START)
-                .map(|start| (start, LEGACY_CODEX_END))
-        });
+    let marker = existing.find(CODEX_START).map(|start| (start, CODEX_END));
     let Some((start, end_marker)) = marker else {
         if existing.trim().is_empty() {
             return block.to_string();
@@ -182,13 +181,6 @@ pub fn canonical_mcp_path(root: &Path, agents_dir: &Path) -> std::path::PathBuf 
     root.join(agents_dir).join("mcp.json")
 }
 
-/// Returns a canonical empty MCP config as a string. Used when initialising a
-/// new project so the file exists in the expected shape before any servers are
-/// configured.
-pub fn empty_mcp() -> &'static str {
-    EMPTY_MCP
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -206,17 +198,6 @@ mod tests {
         assert!(next.contains("[mcp_servers.demo]"));
         assert!(!next.contains("old = true"));
         assert!(next.ends_with('\n'));
-    }
-
-    #[test]
-    fn marker_block_replaces_legacy_markers() {
-        let existing = "# >>> agentstitch:mcp >>>\nold = true\n# <<< agentstitch:mcp <<<\n";
-        let next = replace_marker_block(existing, block());
-
-        assert!(next.contains(CODEX_START));
-        assert!(next.contains("[mcp_servers.demo]"));
-        assert!(!next.contains(LEGACY_CODEX_START));
-        assert!(!next.contains("old = true"));
     }
 
     #[test]

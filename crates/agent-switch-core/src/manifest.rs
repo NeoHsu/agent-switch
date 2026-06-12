@@ -1,12 +1,13 @@
 use std::{collections::BTreeMap, path::Path};
 
-use std::fs;
-
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::{TOOL_VERSION, fs::read_text};
+use crate::{
+    TOOL_VERSION,
+    fs::{atomic_write, read_text},
+};
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct Manifest {
@@ -56,11 +57,9 @@ pub fn load(path: &Path) -> Result<Manifest> {
 
 pub fn save(path: &Path, manifest: &mut Manifest) -> Result<()> {
     manifest.meta = ManifestMeta::default();
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
     let text = serde_json::to_string_pretty(manifest)?;
-    fs::write(path, format!("{text}\n"))?;
+    let text = format!("{text}\n");
+    atomic_write(path, text.as_bytes())?;
     Ok(())
 }
 

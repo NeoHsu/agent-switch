@@ -1,4 +1,4 @@
-use std::{env, path::PathBuf, process};
+use std::{path::PathBuf, process};
 
 use agent_switch_core::{
     config, diagnostics, init, setup, sync, CommandOutput, Error, ExitCode, TOOL_VERSION,
@@ -18,8 +18,7 @@ struct Cli {
     #[arg(long, global = true, env = "AGENT_SWITCH_CONFIG")]
     config: Option<PathBuf>,
     /// Comma-separated list of tools to target (e.g. `claude,copilot`).
-    /// Also accepted as `--target` for backward compatibility.
-    #[arg(long, global = true, alias = "target", env = "AGENT_SWITCH_TOOLS")]
+    #[arg(long, global = true, env = "AGENT_SWITCH_TOOLS")]
     tool: Option<String>,
     #[arg(long, global = true)]
     quiet: bool,
@@ -118,17 +117,9 @@ fn main() {
 }
 
 fn run(cli: Cli) -> Result<CommandOutput> {
-    // AGENTSTITCH_* are legacy env var names kept for backward compatibility with
-    // the previous project name; AGENT_SWITCH_* variants are handled by clap.
-    let root_arg = cli
-        .root
-        .or_else(|| env::var_os("AGENTSTITCH_ROOT").map(PathBuf::from));
-    let root = config::find_root(root_arg.as_deref())?;
-    let config_path = cli
-        .config
-        .or_else(|| env::var_os("AGENTSTITCH_CONFIG").map(PathBuf::from));
-    let raw_tools = cli.tool.or_else(|| env::var("AGENTSTITCH_TOOLS").ok());
-    let tools = raw_tools.as_deref().map(config::parse_tools).transpose()?;
+    let root = config::find_root(cli.root.as_deref())?;
+    let config_path = cli.config;
+    let tools = cli.tool.as_deref().map(config::parse_tools).transpose()?;
     let tools_ref = tools.as_deref();
 
     let mut out = match cli.command {
@@ -174,9 +165,17 @@ fn run(cli: Cli) -> Result<CommandOutput> {
             )?
         }
         Commands::Doctor(args) => {
-            let cfg = config::load_config(&root, config_path.as_deref())
-                .ok()
-                .map(|(cfg, _)| cfg);
+            let path = config::resolve_config_path(&root, config_path.as_deref());
+            let cfg = if path.exists() || config_path.is_some() {
+                match config::load_config(&root, config_path.as_deref()) {
+                    Ok((cfg, _)) => Some(cfg),
+                    Err(err) => {
+                        return diagnostics::doctor_config_error(&root, &path, &err, args.json);
+                    }
+                }
+            } else {
+                None
+            };
             diagnostics::doctor(&root, cfg.as_ref(), args.json)?
         }
         Commands::Mappings(cmd) => match cmd.command {
