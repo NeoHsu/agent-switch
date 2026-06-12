@@ -1,0 +1,14 @@
+/target/
+/.agentstitch.yaml
+/.agents/
+/.claude/
+/.copilot/
+/.pi/
+/.agent/
+/.codex/
+/.opencode/
+/.github/agents/
+/.github/prompts/
+/.github/instructions/
+/opencode.json
+/CLAUDE.md

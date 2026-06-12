@@ -1,0 +1,26 @@
+[workspace]
+members = [
+  "crates/agentstitch-cli",
+  "crates/agentstitch-core",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+agentstitch-core = { path = "crates/agentstitch-core" }
+anyhow = "1"
+camino = { version = "1", features = ["serde1"] }
+clap = { version = "4", features = ["derive", "env"] }
+pathdiff = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+sha2 = "0.10"
+tempfile = "3"
+thiserror = "2"
+toml_edit = { version = "0.23", features = ["serde"] }
+walkdir = "2"
