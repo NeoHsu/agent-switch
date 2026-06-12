@@ -14,7 +14,12 @@ ags setup --tool codex --prune
 ags setup --check
 ags sync
 ags sync --check
+# import-only / export-only are mutually exclusive
 ags sync --tool codex,copilot
+ags sync --check --import-only
+ags sync --check --export-only
+ags sync --json
+ags sync --json --event-filter generated,merged
 ags doctor
 ags mappings validate
 ags version
@@ -27,9 +32,7 @@ Global options:
 --config <path>
 --tool <list>
 --target <list>
---verbose
 --quiet
---no-color
 ```
 
 Supported tools in v1:
@@ -84,8 +87,23 @@ The release binary is:
 target/release/ags
 ```
 
+## Sync Event Filtering and JSON Output
+
+`ags sync --event-filter` lets you keep only selected events in text or JSON output.
+
+```bash
+ags sync --json --event-filter imported,generated
+ags sync --check --json --event-filter drift,synced_no_changes
+```
+
+When `--json` is used, events are emitted in a deterministic order and payload
+fields are fixed for scripts and CI machines.
+
 ## Test
 
 ```bash
 cargo test
 ```
+
+CI runs `cargo fmt --check`, `cargo clippy -- -D warnings`, and `cargo test`
+on Linux, macOS, and Windows.
