@@ -8,7 +8,7 @@ use anyhow::Result;
 use crate::{
     config::{self, Config},
     fs::{abs, is_fake_symlink, relative_link, remove_file_or_empty_dir, repo_path},
-    sync, CommandOutput, ExitCode,
+    manifest, sync, CommandOutput, ExitCode,
 };
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -16,6 +16,7 @@ pub struct SetupOptions {
     pub no_sync: bool,
     pub check: bool,
     pub force: bool,
+    pub prune: bool,
 }
 
 pub fn run(
@@ -26,6 +27,9 @@ pub fn run(
 ) -> Result<CommandOutput> {
     let mut out = CommandOutput::default();
     let mut drift = false;
+    if opts.prune {
+        drift |= prune_unselected(root, cfg, tools, opts.check, &mut out)?;
+    }
     for (link, target) in &cfg.symlinks {
         if !config::symlink_selected(link, target, tools) {
             continue;
@@ -106,6 +110,73 @@ pub fn run(
         out.exit = sync_out.exit;
     }
     Ok(out)
+}
+
+fn prune_unselected(
+    root: &Path,
+    cfg: &Config,
+    tools: Option<&[String]>,
+    check: bool,
+    out: &mut CommandOutput,
+) -> Result<bool> {
+    let Some(tools) = tools else {
+        return Ok(false);
+    };
+    let manifest_path = abs(root, &cfg.manifest);
+    let mut sync_manifest = manifest::load(&manifest_path)?;
+    let mut changed = false;
+    let mut manifest_changed = false;
+
+    for (link, target) in &cfg.symlinks {
+        if config::symlink_selected(link, target, Some(tools)) {
+            continue;
+        }
+        let link_rel = Path::new(link);
+        let target_rel = Path::new(target);
+        let link_abs = abs(root, link_rel);
+        let target_abs = abs(root, target_rel);
+        let rel_target = relative_link(&link_abs, &target_abs);
+        let link_key = repo_path(link_rel);
+        let had_manifest_link = sync_manifest.links.contains_key(&link_key);
+
+        if is_correct_link(&link_abs, &target_abs)? {
+            changed = true;
+            if !check {
+                remove_file_or_empty_dir(&link_abs)?;
+            }
+            out.push(format!("removed: {}", link_key));
+        } else if is_fake_symlink(&link_abs, &rel_target, target) {
+            changed = true;
+            if !check {
+                remove_file_or_empty_dir(&link_abs)?;
+            }
+            out.push(format!("removed: {}", link_key));
+        } else if sync_manifest.links.contains_key(&link_key) && link_abs.is_file() {
+            changed = true;
+            if !check {
+                remove_file_or_empty_dir(&link_abs)?;
+            }
+            out.push(format!("removed: {}", link_key));
+        } else if had_manifest_link && !link_abs.exists() {
+            changed = true;
+            out.push(format!("removed: {}", link_key));
+        } else if link_abs.exists() || link_abs.is_symlink() {
+            out.push(format!(
+                "skipped  {}: existing real file or directory; remove it manually if it is no longer needed",
+                link_key
+            ));
+        }
+
+        if sync_manifest.links.remove(&link_key).is_some() {
+            manifest_changed = true;
+        }
+    }
+
+    if manifest_changed && !check {
+        manifest::save(&manifest_path, &mut sync_manifest)?;
+    }
+
+    Ok(changed || manifest_changed)
 }
 
 fn is_correct_link(link: &Path, target: &Path) -> Result<bool> {

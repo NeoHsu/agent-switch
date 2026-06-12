@@ -57,6 +57,8 @@ struct SetupArgs {
     check: bool,
     #[arg(long)]
     force: bool,
+    #[arg(long)]
+    prune: bool,
 }
 
 #[derive(Debug, Args)]
@@ -132,6 +134,7 @@ fn run(cli: Cli) -> Result<CommandOutput> {
                     no_sync: args.no_sync,
                     check: args.check,
                     force: args.force,
+                    prune: args.prune,
                 },
             )?
         }

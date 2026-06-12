@@ -10,6 +10,7 @@ The binary name is `agentstitch`.
 ```bash
 agentstitch init
 agentstitch setup
+agentstitch setup --tool codex --prune
 agentstitch setup --check
 agentstitch sync
 agentstitch sync --check
@@ -50,6 +51,10 @@ manifest: .agents/.sync-manifest.json
 
 Run `agentstitch init` to create the default config, canonical directories, sample files,
 and recommended `.gitignore` entries.
+
+Use `agentstitch setup --tool <tool> --prune` when switching tools and you want
+AgentStitch to remove links/copy fallbacks for tools that are no longer selected. Pruning
+is conservative: unmanaged real files and directories are skipped.
 
 ## Migration From Repo-Local Scripts
 
