@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::BTreeMap};
+use std::borrow::Cow;
 
 use anyhow::Result;
 use noyalib::{Mapping, Value};
@@ -176,10 +176,6 @@ pub fn apply_to_to_paths(apply_to: Option<String>, frontmatter: &mut Mapping) {
     if !values.is_empty() {
         frontmatter.insert("paths", Value::Sequence(values));
     }
-}
-
-pub fn mapping_from_pairs(pairs: BTreeMap<String, Value>) -> Mapping {
-    pairs.into_iter().collect()
 }
 
 #[cfg(test)]

@@ -1,6 +1,6 @@
 use anyhow::Result;
 use noyalib::{Mapping, Value};
-use toml_edit::{value, DocumentMut, Item, Table};
+use toml_edit::{value, DocumentMut, InlineTable, Item, Table};
 
 use super::markdown::{self, render, set_string};
 
@@ -49,31 +49,6 @@ pub fn import_agent(source: &str) -> Result<String> {
 
 fn yaml_to_toml(yaml_value: Value) -> Item {
     match yaml_value {
-        Value::Bool(v) => value(v),
-        Value::Number(v) => {
-            // as_i64() returns Some only for whole numbers; as_f64() always succeeds.
-            if let Some(i) = v.as_i64() {
-                value(i)
-            } else {
-                value(v.as_f64())
-            }
-        }
-        Value::String(v) => value(v),
-        Value::Sequence(seq) => {
-            let arr = seq.into_iter().filter_map(|v| match v {
-                Value::String(s) => Some(toml_edit::Value::from(s)),
-                Value::Bool(b) => Some(toml_edit::Value::from(b)),
-                Value::Number(n) => {
-                    if let Some(i) = n.as_i64() {
-                        Some(toml_edit::Value::from(i))
-                    } else {
-                        Some(toml_edit::Value::from(n.as_f64()))
-                    }
-                }
-                _ => None,
-            });
-            value(toml_edit::Array::from_iter(arr))
-        }
         Value::Mapping(map) => {
             let mut table = Table::new();
             for (key, val) in map {
@@ -81,42 +56,84 @@ fn yaml_to_toml(yaml_value: Value) -> Item {
             }
             Item::Table(table)
         }
-        _ => value(value_to_string(yaml_value)),
+        other => Item::Value(yaml_to_toml_value(other)),
+    }
+}
+
+fn yaml_to_toml_value(yaml_value: Value) -> toml_edit::Value {
+    match yaml_value {
+        Value::Bool(v) => toml_edit::Value::from(v),
+        Value::Number(v) => {
+            // as_i64() returns Some only for whole numbers; as_f64() always succeeds.
+            if let Some(i) = v.as_i64() {
+                toml_edit::Value::from(i)
+            } else {
+                toml_edit::Value::from(v.as_f64())
+            }
+        }
+        Value::String(v) => toml_edit::Value::from(v),
+        Value::Sequence(seq) => {
+            let arr = seq.into_iter().map(yaml_to_toml_value);
+            toml_edit::Value::Array(toml_edit::Array::from_iter(arr))
+        }
+        Value::Mapping(map) => {
+            let mut table = InlineTable::new();
+            for (key, val) in map {
+                table.insert(key, yaml_to_toml_value(val));
+            }
+            toml_edit::Value::InlineTable(table)
+        }
+        other => toml_edit::Value::from(value_to_string(other)),
     }
 }
 
 fn toml_to_yaml(item: &Item) -> Value {
     if let Some(v) = item.as_value() {
-        if let Some(s) = v.as_str() {
-            Value::String(s.to_string())
-        } else if let Some(b) = v.as_bool() {
-            Value::Bool(b)
-        } else if let Some(i) = v.as_integer() {
-            Value::Number(i.into())
-        } else if let Some(f) = v.as_float() {
-            Value::Number(f.into())
-        } else if let Some(arr) = v.as_array() {
-            Value::Sequence(
-                arr.iter()
-                    .filter_map(|v| {
-                        if let Some(s) = v.as_str() {
-                            Some(Value::String(s.to_string()))
-                        } else if let Some(b) = v.as_bool() {
-                            Some(Value::Bool(b))
-                        } else if let Some(i) = v.as_integer() {
-                            Some(Value::Number(i.into()))
-                        } else {
-                            v.as_float().map(|f| Value::Number(f.into()))
-                        }
-                    })
-                    .collect(),
-            )
-        } else {
-            Value::String(v.to_string())
-        }
-    } else {
-        Value::String(item.to_string())
+        return toml_value_to_yaml(v);
     }
+    if let Some(table) = item.as_table() {
+        return table_to_yaml(table);
+    }
+    if let Some(array) = item.as_array_of_tables() {
+        return Value::Sequence(array.iter().map(table_to_yaml).collect());
+    }
+    Value::String(item.to_string())
+}
+
+fn toml_value_to_yaml(value: &toml_edit::Value) -> Value {
+    if let Some(s) = value.as_str() {
+        Value::String(s.to_string())
+    } else if let Some(b) = value.as_bool() {
+        Value::Bool(b)
+    } else if let Some(i) = value.as_integer() {
+        Value::Number(i.into())
+    } else if let Some(f) = value.as_float() {
+        Value::Number(f.into())
+    } else if let Some(arr) = value.as_array() {
+        Value::Sequence(arr.iter().map(toml_value_to_yaml).collect())
+    } else if let Some(table) = value.as_inline_table() {
+        inline_table_to_yaml(table)
+    } else if let Some(datetime) = value.as_datetime() {
+        Value::String(datetime.to_string())
+    } else {
+        Value::String(value.to_string())
+    }
+}
+
+fn table_to_yaml(table: &Table) -> Value {
+    let mut map = Mapping::new();
+    for (key, item) in table.iter() {
+        map.insert(key, toml_to_yaml(item));
+    }
+    Value::Mapping(map)
+}
+
+fn inline_table_to_yaml(table: &InlineTable) -> Value {
+    let mut map = Mapping::new();
+    for (key, value) in table.iter() {
+        map.insert(key, toml_value_to_yaml(value));
+    }
+    Value::Mapping(map)
 }
 
 fn value_to_string(value: Value) -> String {

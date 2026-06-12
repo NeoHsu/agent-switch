@@ -33,14 +33,6 @@ impl Format {
     }
 }
 
-pub fn export(format: Format, source: &str) -> Result<String> {
-    format.export(source)
-}
-
-pub fn import(format: Format, generated_path: &Path, generated: &str) -> Result<String> {
-    format.import(generated_path, generated)
-}
-
 fn ensure_trailing_newline(mut text: String) -> String {
     if !text.ends_with('\n') {
         text.push('\n');

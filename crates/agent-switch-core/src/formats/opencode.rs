@@ -21,9 +21,10 @@ pub fn import_agent(path: &Path, source: &str) -> Result<String> {
         &["description"],
         &["description", "mode"],
     );
-    if !fm.contains_key("name")
-        && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
-    {
+    if fm.contains_key("name") {
+        return render(fm, &doc.body);
+    }
+    if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
         let mut with_name = noyalib::Mapping::new();
         set_string(&mut with_name, "name", stem);
         merge_mapping(&mut with_name, fm);
