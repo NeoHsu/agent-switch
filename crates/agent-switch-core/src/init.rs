@@ -133,7 +133,7 @@ fn filtered_default_config(tools: Option<&[Tool]>) -> Config {
     cfg
 }
 
-fn update_gitignore(root: &Path, out: &mut CommandOutput) -> Result<()> {
+pub fn update_gitignore(root: &Path, out: &mut CommandOutput) -> Result<()> {
     let path = root.join(".gitignore");
     let current = match fs::read_to_string(&path) {
         Ok(current) => current,

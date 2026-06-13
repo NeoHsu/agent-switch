@@ -7,6 +7,7 @@ pub mod fs;
 pub mod init;
 pub mod manifest;
 pub mod mcp;
+pub mod migrate;
 pub mod setup;
 pub mod sync;
 pub mod tool;
