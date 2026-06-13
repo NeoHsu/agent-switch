@@ -59,6 +59,7 @@ crates/
     ├── src/lib.rs               public modules, shared Error/ExitCode/CommandOutput
     ├── src/config.rs            config schema, defaults, path/tool validation
     ├── src/init.rs              `ags init`
+    ├── src/migrate.rs           `ags migrate`
     ├── src/setup.rs             symlink/copy setup and prune
     ├── src/sync.rs              sync orchestration
     ├── src/sync/                sync plan, events, report, stages
@@ -90,16 +91,16 @@ crates/
                              | dispatch by subcommand          |
                              +---------------+----------------+
                                              |
-       +----------+----------+---------------+-------------+-------------+
-       |          |                          |             |             |
-       v          v                          v             v             v
-+------+---+  +---+----------------+  +------+-------+  +--+-------+  +--+----------+
-| init     |  | setup              |  | sync         |  | doctor   |  | mappings    |
-|          |  | load config        |  | load config  |  | optional |  | validate    |
-| init::run|  | setup::run         |  | sync::run    |  | config   |  | load config |
-+----------+  +--------------------+  +--------------+  +----+-----+  +------+------+
-                                                            |               |
-                                                            v               v
+       +----------+----------+----------+----------+----------+----------+
+       |          |          |          |          |          |          |
+       v          v          v          v          v          v
++------+---+  +---+------+  +---+----------------+  +------+-------+  +--+-------+  +--+----------+
+| init     |  | migrate |  | setup              |  | sync         |  | doctor   |  | mappings    |
+|          |  | cfg I/O |  | load config        |  | load config  |  | optional |  | validate    |
+| init::run|  | run     |  | setup::run         |  | sync::run    |  | config   |  | load config |
++----------+  +----------+  +--------------------+  +--------------+  +----+-----+  +------+------+
+                                                                         |               |
+                                                                         v               v
                                                    +--------+------+  +-----+-----------+
                                                    | diagnostics   |  | diagnostics     |
                                                    | ::doctor      |  | ::validate      |

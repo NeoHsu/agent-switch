@@ -8,6 +8,8 @@ formats used by coding-agent tools.
 The current command surface is small enough to keep as-is:
 
 - `init` is for first-time repository bootstrapping.
+- `migrate` is for importing existing native tool files into canonical
+  `.agents/` files before switching to managed links/generated outputs.
 - `setup` is for preparing native tool entry points and optionally pruning old
   managed links.
 - `sync` is for converting between canonical `.agents/` files and native tool
@@ -29,9 +31,10 @@ These options are accepted globally:
 - `--root <path>` or `AGENT_SWITCH_ROOT`: run against a specific repository
   root instead of discovering one from the current directory.
 - `--config <path>` or `AGENT_SWITCH_CONFIG`: use a non-default config path.
-  This is meaningful for `setup`, `sync`, `doctor`, and `mappings validate`.
+  This is meaningful for `migrate`, `setup`, `sync`, `doctor`, and
+  `mappings validate`.
 - `--tool <list>` or `AGENT_SWITCH_TOOLS`: target a comma-separated tool list.
-  This is meaningful for `setup` and `sync`.
+  This is meaningful for `migrate`, `setup`, and `sync`.
 - `--quiet`: suppress normal output while preserving exit status.
 - `--verbose` or `-v`: print command diagnostics to stderr.
 - `--debug`: print detailed diagnostics to stderr; implies `--verbose`.
@@ -66,7 +69,45 @@ ags init --force
 
 `init --tools` is intentionally separate from global `--tool`: it changes the
 starter config that gets written. Global `--tool` is a runtime filter for
-`setup` and `sync`.
+`migrate`, `setup`, and `sync`.
+
+## Migrating Existing Native Tool Files
+
+Import existing Claude, Codex, Copilot, OpenCode, Pi, and Antigravity native
+files into the canonical layout, back up managed native paths, then run setup:
+
+```bash
+ags migrate
+```
+
+Migrate only selected source tools:
+
+```bash
+ags --tool claude,copilot migrate
+```
+
+Check what would be imported/backed up without writing:
+
+```bash
+ags migrate --check
+```
+
+Keep existing native paths in place (equivalent to skipping setup):
+
+```bash
+ags migrate --keep-native
+ags migrate --no-setup
+```
+
+`migrate` creates `.agent-switch.yaml` if needed. For symlink/copy mappings it
+copies native files such as `CLAUDE.md`, `.claude/commands`, `.agent/rules`, or
+`.opencode/commands` into their canonical targets, then backs up the native
+paths as `.bak` so `setup` can create managed links. For generated formats it
+imports `.github`, `.codex`, and `.opencode` generated files into `.agents/`.
+For MCP configs it imports known native MCP shapes into `.agents/mcp.json`.
+Conflicting canonical files are skipped unless `--force` is used. Use
+`--keep-native` when you want to preserve native files instead of backing them
+up.
 
 ## Preparing Native Tool Files
 

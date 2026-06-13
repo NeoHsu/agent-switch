@@ -22,6 +22,14 @@ ags setup
 ags sync
 ```
 
+Migrate an existing native-tool repository into the canonical layout:
+
+```bash
+ags migrate
+# or only selected source tools
+ags --tool claude,copilot migrate
+```
+
 Check for drift in CI without writing files:
 
 ```bash
@@ -40,6 +48,8 @@ ags sync --tool codex
 
 ```bash
 ags init
+ags migrate
+ags migrate --check
 ags setup
 ags setup --tool codex --prune
 ags setup --check
@@ -161,7 +171,10 @@ merge:
 
 Run `ags init` to create the default config, canonical directories, sample files,
 and recommended `.gitignore` entries. Use `ags init --tools codex,copilot` to
-write a starter config filtered to only those tool mappings.
+write a starter config filtered to only those tool mappings. Run `ags migrate`
+in repositories that already have native agent files; it imports supported
+native layouts into `.agents/`, backs up managed native paths as `.bak`, and then
+runs setup.
 
 Config paths are validated before any setup or sync work runs:
 
