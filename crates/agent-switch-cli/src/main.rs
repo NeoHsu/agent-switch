@@ -82,6 +82,9 @@ struct SyncArgs {
     /// Export canonical .agents files to native tool formats only.
     #[arg(long, conflicts_with = "import_only")]
     export_only: bool,
+    /// Ignore the existing sync manifest and rebuild it from current files.
+    #[arg(long)]
+    reset_manifest: bool,
     /// Emit a deterministic machine-readable sync report.
     #[arg(long)]
     json: bool,
@@ -182,6 +185,7 @@ fn run(cli: Cli) -> Result<CommandOutput> {
                     check: args.check,
                     import_only: args.import_only,
                     export_only: args.export_only,
+                    reset_manifest: args.reset_manifest,
                     json: args.json,
                     event_filter,
                 },

@@ -32,7 +32,7 @@ pub fn doctor(root: &Path, cfg: Option<&Config>, json_output: bool) -> Result<Co
     let manifest_path_display = display_path(root, &manifest_path);
     let manifest_recovery = manifest_error
         .as_ref()
-        .map(|_| format!("Delete {manifest_path_display} and run `ags sync` to rebuild it."));
+        .map(|_| "Run `ags sync --reset-manifest` to rebuild it.".to_string());
 
     if json_output {
         out.push(serde_json::to_string_pretty(&json!({
@@ -69,9 +69,7 @@ pub fn doctor(root: &Path, cfg: Option<&Config>, json_output: bool) -> Result<Co
         if let Some(err) = manifest_error {
             out.push(format!("error:   {err}"));
         }
-        out.push(format!(
-            "hint:    delete {manifest_path_display} and run `ags sync` to rebuild it"
-        ));
+        out.push("hint:    run `ags sync --reset-manifest` to rebuild it");
     }
     if let Some(cfg) = cfg {
         for (link, spec) in &cfg.symlinks {
@@ -94,6 +92,7 @@ pub fn doctor(root: &Path, cfg: Option<&Config>, json_output: bool) -> Result<Co
                 check: true,
                 import_only: false,
                 export_only: false,
+                reset_manifest: false,
                 json: false,
                 event_filter: None,
             },

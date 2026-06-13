@@ -228,9 +228,11 @@ fn doctor_reports_manifest_recovery_hint() {
             line == "warning: manifest is not parseable: .agents/.sync-manifest.json"
         })
     );
-    assert!(out.lines.iter().any(|line| {
-        line == "hint:    delete .agents/.sync-manifest.json and run `ags sync` to rebuild it"
-    }));
+    assert!(
+        out.lines
+            .iter()
+            .any(|line| line == "hint:    run `ags sync --reset-manifest` to rebuild it")
+    );
 }
 
 #[test]
@@ -255,7 +257,7 @@ fn doctor_json_reports_manifest_recovery_hint() {
     );
     assert_eq!(
         report["manifest_recovery"].as_str(),
-        Some("Delete .agents/.sync-manifest.json and run `ags sync` to rebuild it.")
+        Some("Run `ags sync --reset-manifest` to rebuild it.")
     );
 }
 

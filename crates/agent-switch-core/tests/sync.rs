@@ -5,6 +5,7 @@ use serde_json::json;
 use agent_switch_core::{
     Error, ExitCode,
     config::{self, Config},
+    manifest,
     sync::{self, SyncOptions},
     tool::Tool,
 };
@@ -125,7 +126,57 @@ fn sync_reports_manifest_recovery_hint() {
     let message = format!("{err:#}");
 
     assert!(message.contains("failed to read manifest .agents/.sync-manifest.json"));
-    assert!(message.contains("Delete it and run `ags sync` to rebuild it."));
+    assert!(message.contains("Run `ags sync --reset-manifest` to rebuild it."));
+}
+
+#[test]
+fn sync_reset_manifest_rebuilds_corrupt_manifest() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+    let cfg = fixture(root);
+    let manifest_path = root.join(".agents/.sync-manifest.json");
+    write(&manifest_path, "{not json\n");
+
+    let out = sync::run(
+        root,
+        &cfg,
+        None,
+        SyncOptions {
+            reset_manifest: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert!(out.lines.iter().any(|line| {
+        line == "warning: reset manifest: rebuilding .agents/.sync-manifest.json from current files"
+    }));
+    let rebuilt = manifest::load(&manifest_path).unwrap();
+    assert!(!rebuilt.generated.is_empty());
+}
+
+#[test]
+fn sync_reset_manifest_check_reports_drift_without_writing() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+    let cfg = fixture(root);
+    let manifest_path = root.join(".agents/.sync-manifest.json");
+    write(&manifest_path, "{not json\n");
+
+    let out = sync::run(
+        root,
+        &cfg,
+        None,
+        SyncOptions {
+            check: true,
+            reset_manifest: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(out.exit(), ExitCode::Drift);
+    assert_eq!(fs::read_to_string(&manifest_path).unwrap(), "{not json\n");
 }
 
 #[test]
@@ -150,6 +201,7 @@ fn sync_can_output_machine_readable_json() {
     assert_eq!(report["exit"], json!("Ok"));
     assert_eq!(report["exit_code"].as_i64().unwrap(), 0);
     assert!(report["options"]["json"].as_bool().unwrap());
+    assert!(!report["options"]["reset_manifest"].as_bool().unwrap());
     assert!(!report["events"].as_array().unwrap().is_empty());
     assert_eq!(
         report["summary"]["total_events"].as_u64().unwrap() as usize,

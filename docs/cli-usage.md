@@ -133,6 +133,13 @@ ags sync --import-only
 ags sync --export-only
 ```
 
+Rebuild a missing or corrupt manifest from the current working tree:
+
+```bash
+ags sync --reset-manifest
+ags sync --reset-manifest --check
+```
+
 Target selected tools:
 
 ```bash
@@ -190,13 +197,14 @@ ags init
 If the sync manifest is corrupt, rebuild it from the working tree:
 
 ```bash
-rm .agents/.sync-manifest.json
-ags sync
+ags sync --reset-manifest
 ```
 
-`ags doctor` reports the manifest path and the same recovery hint. Permission
-errors include the attempted action and path, for example creating a parent
-directory, creating a symlink, or replacing a generated file.
+`ags doctor` reports the manifest path and the same recovery hint. If an older
+script cannot pass `--reset-manifest`, deleting `.agents/.sync-manifest.json`
+and then running `ags sync` is equivalent. Permission errors include the
+attempted action and path, for example creating a parent directory, creating a
+symlink, or replacing a generated file.
 
 ## Version Metadata
 

@@ -33,6 +33,7 @@ struct SyncJsonOptions {
     check: bool,
     import_only: bool,
     export_only: bool,
+    reset_manifest: bool,
     json: bool,
     event_filter: Option<Vec<String>>,
 }
@@ -115,6 +116,7 @@ impl SyncReport {
             check: opts.check,
             import_only: opts.import_only,
             export_only: opts.export_only,
+            reset_manifest: opts.reset_manifest,
             json: opts.json,
             event_filter: opts
                 .event_filter

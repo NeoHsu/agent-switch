@@ -50,7 +50,7 @@ pub fn load(path: &Path) -> Result<Manifest> {
     let content = read_text(path).map_err(|err| io_error("read manifest", path, err))?;
     let mut manifest: Manifest = serde_json::from_str(&content).map_err(|err| {
         Error::Config(format!(
-            "manifest is not parseable: {}: {err}. Delete it and run `ags sync` to rebuild it.",
+            "manifest is not parseable: {}: {err}. Run `ags sync --reset-manifest` to rebuild it.",
             path.display()
         ))
     })?;

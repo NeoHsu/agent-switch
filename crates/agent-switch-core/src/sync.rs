@@ -26,6 +26,7 @@ pub struct SyncOptions {
     pub check: bool,
     pub import_only: bool,
     pub export_only: bool,
+    pub reset_manifest: bool,
     pub json: bool,
     pub event_filter: Option<Vec<event::SyncEventKind>>,
 }
@@ -48,13 +49,24 @@ pub fn run(
 
     let manifest_path = abs(root, &cfg.manifest);
     let manifest_path_display = repo_path(&cfg.manifest);
-    let mut manifest = manifest::load(&manifest_path)
-        .with_context(|| format!("failed to read manifest {manifest_path_display}"))?;
+    let mut manifest = if opts.reset_manifest {
+        manifest::Manifest::default()
+    } else {
+        manifest::load(&manifest_path)
+            .with_context(|| format!("failed to read manifest {manifest_path_display}"))?
+    };
     let plan = SyncPlan::build(root, cfg, tools)?;
     let ctx = SyncContext::new(root, cfg, tools, opts.check);
 
     let mut report = SyncReport::default();
-    let mut changed = false;
+    let mut changed = opts.reset_manifest;
+    if opts.reset_manifest {
+        report.push(SyncEvent::Warning {
+            message: format!(
+                "reset manifest: rebuilding {manifest_path_display} from current files"
+            ),
+        });
+    }
 
     let stages: [&dyn SyncStage; 5] = [
         &ImportStage,
