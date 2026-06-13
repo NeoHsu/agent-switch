@@ -1,3 +1,5 @@
+//! OpenCode agent import/export.
+
 use std::path::Path;
 
 use anyhow::Result;

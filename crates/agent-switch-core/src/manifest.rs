@@ -1,3 +1,5 @@
+//! Sync manifest storage and hashing helpers.
+
 use std::{collections::BTreeMap, path::Path};
 
 use anyhow::Result;

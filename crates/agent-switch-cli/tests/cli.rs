@@ -83,3 +83,61 @@ fn sync_reset_manifest_rebuilds_corrupt_manifest() {
         serde_json::from_str(&fs::read_to_string(manifest_path).unwrap()).unwrap();
     assert_eq!(manifest["meta"]["tool"], "agent-switch");
 }
+
+#[test]
+fn verbose_sync_json_keeps_stdout_machine_readable() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+
+    let init = Command::new(env!("CARGO_BIN_EXE_ags"))
+        .arg("--root")
+        .arg(root)
+        .arg("init")
+        .output()
+        .unwrap();
+    assert_eq!(init.status.code(), Some(0));
+
+    let output = Command::new(env!("CARGO_BIN_EXE_ags"))
+        .arg("--root")
+        .arg(root)
+        .arg("--verbose")
+        .arg("sync")
+        .arg("--json")
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["exit"], "Ok");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("verbose: command: sync"),
+        "stderr was: {stderr}"
+    );
+    assert!(
+        stderr.contains("verbose: sync stages: import, export, remove-stale, sync-links, merge"),
+        "stderr was: {stderr}"
+    );
+}
+
+#[test]
+fn version_json_reports_build_metadata() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ags"))
+        .arg("version")
+        .arg("--json")
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(
+        report["rustc"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty())
+    );
+    assert!(
+        report["cargo_lock_sha256"]
+            .as_str()
+            .is_some_and(|value| value.len() == 64)
+    );
+}

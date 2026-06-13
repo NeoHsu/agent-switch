@@ -1,3 +1,5 @@
+//! Importers and exporters for native tool file formats.
+
 pub mod codex;
 pub mod copilot;
 pub mod markdown;

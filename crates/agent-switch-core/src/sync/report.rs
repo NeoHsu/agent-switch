@@ -12,7 +12,13 @@ use super::{
 
 #[derive(Debug, Default)]
 pub(super) struct SyncReport {
-    events: Vec<SyncEvent>,
+    records: Vec<SyncRecord>,
+}
+
+#[derive(Debug, Clone)]
+struct SyncRecord {
+    sequence: usize,
+    event: SyncEvent,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -45,22 +51,32 @@ struct SyncOutputPayload {
     changed: bool,
     summary: SyncSummary,
     options: SyncJsonOptions,
-    events: Vec<SyncEvent>,
+    events: Vec<SyncJsonEvent>,
+}
+
+#[derive(Debug, Serialize)]
+struct SyncJsonEvent {
+    sequence: usize,
+    #[serde(flatten)]
+    event: SyncEvent,
 }
 
 impl SyncReport {
     pub(super) fn push(&mut self, event: SyncEvent) {
-        self.events.push(event);
+        self.records.push(SyncRecord {
+            sequence: self.records.len() + 1,
+            event,
+        });
     }
 
     pub(super) fn is_empty(&self) -> bool {
-        self.events.is_empty()
+        self.records.is_empty()
     }
 
     pub(super) fn into_output(self, filter: Option<&[SyncEventKind]>) -> CommandOutput {
         let mut out = CommandOutput::default();
-        for event in self.filtered_events(filter) {
-            out.push(event.as_line());
+        for record in self.filtered_records(filter) {
+            out.push(record.event.as_line());
         }
         out
     }
@@ -87,21 +103,29 @@ impl SyncReport {
         summary
     }
 
-    fn filtered_events(&self, filter: Option<&[SyncEventKind]>) -> Vec<SyncEvent> {
-        let mut events = self.events.clone();
+    fn filtered_records(&self, filter: Option<&[SyncEventKind]>) -> Vec<SyncRecord> {
+        let mut records = self.records.clone();
 
         if let Some(filter) = filter {
             let filter: HashSet<SyncEventKind> = filter.iter().copied().collect();
-            events.retain(|event| filter.contains(&event.kind()));
+            records.retain(|record| filter.contains(&record.event.kind()));
         }
 
-        events.sort_by(|left, right| {
-            let left_key = (left.kind().sort_order(), left.as_line());
-            let right_key = (right.kind().sort_order(), right.as_line());
+        records.sort_by(|left, right| {
+            let left_key = (
+                left.event.kind().sort_order(),
+                left.event.as_line(),
+                left.sequence,
+            );
+            let right_key = (
+                right.event.kind().sort_order(),
+                right.event.as_line(),
+                right.sequence,
+            );
             left_key.cmp(&right_key)
         });
 
-        events
+        records
     }
 
     pub(super) fn into_json(
@@ -110,8 +134,19 @@ impl SyncReport {
         opts: &SyncOptions,
         exit: ExitCode,
     ) -> Result<String> {
-        let events = self.filtered_events(opts.event_filter.as_deref());
+        let records = self.filtered_records(opts.event_filter.as_deref());
+        let events = records
+            .iter()
+            .map(|record| record.event.clone())
+            .collect::<Vec<_>>();
         let summary = Self::summary(&events);
+        let events = records
+            .into_iter()
+            .map(|record| SyncJsonEvent {
+                sequence: record.sequence,
+                event: record.event,
+            })
+            .collect();
         let options = SyncJsonOptions {
             check: opts.check,
             import_only: opts.import_only,

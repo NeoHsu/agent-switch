@@ -219,6 +219,13 @@ fn sync_can_output_machine_readable_json() {
             .as_array()
             .unwrap()
             .iter()
+            .all(|e| e["sequence"].as_u64().is_some_and(|sequence| sequence > 0))
+    );
+    assert!(
+        report["events"]
+            .as_array()
+            .unwrap()
+            .iter()
             .any(|e| e["event"] == json!("merged"))
     );
 

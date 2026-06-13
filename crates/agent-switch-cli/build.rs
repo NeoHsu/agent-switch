@@ -5,10 +5,13 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use sha2::{Digest, Sha256};
+
 fn main() {
     println!("cargo:rerun-if-env-changed=GIT_SHA");
     println!("cargo:rerun-if-env-changed=BUILD_DATE");
     println!("cargo:rerun-if-env-changed=SOURCE_DATE_EPOCH");
+    println!("cargo:rerun-if-changed=../../Cargo.lock");
     watch_git_head();
 
     if let Ok(target) = env::var("TARGET") {
@@ -24,6 +27,13 @@ fn main() {
         println!("cargo:rustc-env=GIT_SHA={sha}");
     }
 
+    if let Some(rustc_version) = rustc_version() {
+        println!("cargo:rustc-env=RUSTC_VERSION={rustc_version}");
+    }
+    if let Some(lock_hash) = lock_hash() {
+        println!("cargo:rustc-env=CARGO_LOCK_SHA256={lock_hash}");
+    }
+
     let build_date = env::var("BUILD_DATE")
         .ok()
         .map(|date| date.trim().to_string())
@@ -36,6 +46,23 @@ fn main() {
         .or_else(current_build_date)
         .unwrap_or_else(|| "unknown".to_string());
     println!("cargo:rustc-env=BUILD_DATE={build_date}");
+}
+
+fn rustc_version() -> Option<String> {
+    let rustc = env::var("RUSTC").unwrap_or_else(|_| "rustc".to_string());
+    let output = Command::new(rustc).arg("--version").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!value.is_empty()).then_some(value)
+}
+
+fn lock_hash() -> Option<String> {
+    let bytes = fs::read("../../Cargo.lock").ok()?;
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    Some(format!("{:x}", hasher.finalize()))
 }
 
 fn watch_git_head() {

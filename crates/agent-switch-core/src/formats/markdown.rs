@@ -1,3 +1,5 @@
+//! Shared Markdown frontmatter parsing and rendering helpers.
+
 use std::borrow::Cow;
 
 use anyhow::Result;

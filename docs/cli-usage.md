@@ -33,10 +33,15 @@ These options are accepted globally:
 - `--tool <list>` or `AGENT_SWITCH_TOOLS`: target a comma-separated tool list.
   This is meaningful for `setup` and `sync`.
 - `--quiet`: suppress normal output while preserving exit status.
+- `--verbose` or `-v`: print command diagnostics to stderr.
+- `--debug`: print detailed diagnostics to stderr; implies `--verbose`.
 
 Because these are global clap options, `--config` and `--tool` appear in help
 for commands that do not use them. They are kept global so scripts can pass
 common options consistently before or after subcommands.
+
+Verbose and debug diagnostics are written to stderr, so JSON stdout remains
+machine-readable.
 
 ## First-Time Setup
 
@@ -153,6 +158,9 @@ ags sync --json
 ags sync --check --json
 ```
 
+JSON sync events include a deterministic `sequence` field that records event
+production order before text/JSON event sorting.
+
 Filter noisy events in text or JSON output:
 
 ```bash
@@ -220,7 +228,9 @@ Print JSON metadata for release automation:
 ags version --json
 ```
 
-Use `ags --version` only when the package version string is enough.
+`ags version` includes package version, git commit, target, rustc version,
+Cargo.lock SHA-256, and build date. Use `ags --version` only when the package
+version string is enough.
 
 ## CI Patterns
 

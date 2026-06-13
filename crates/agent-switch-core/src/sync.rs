@@ -1,3 +1,5 @@
+//! Synchronization pipeline for import, export, stale removal, links, and merges.
+
 use std::path::Path;
 
 use anyhow::{Context, Result};

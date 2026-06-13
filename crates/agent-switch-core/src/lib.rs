@@ -1,3 +1,5 @@
+//! Core library for synchronizing canonical `.agents/` files with native agent tool formats.
+
 pub mod config;
 pub mod diagnostics;
 pub mod formats;
@@ -8,6 +10,7 @@ pub mod mcp;
 pub mod setup;
 pub mod sync;
 pub mod tool;
+pub mod validator;
 
 pub const TOOL_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -39,12 +42,17 @@ impl ExitCode {
 #[derive(Debug, Default)]
 pub struct CommandOutput {
     pub lines: Vec<String>,
+    pub diagnostics: Vec<String>,
     pub exit: Option<ExitCode>,
 }
 
 impl CommandOutput {
     pub fn push(&mut self, line: impl Into<String>) {
         self.lines.push(line.into());
+    }
+
+    pub fn diagnostic(&mut self, line: impl Into<String>) {
+        self.diagnostics.push(line.into());
     }
 
     pub fn exit(&self) -> ExitCode {

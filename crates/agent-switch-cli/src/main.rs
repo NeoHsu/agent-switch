@@ -1,7 +1,11 @@
-use std::{path::PathBuf, process};
+use std::{
+    path::{Path, PathBuf},
+    process,
+};
 
 use agent_switch_core::{
-    CommandOutput, Error, ExitCode, TOOL_VERSION, config, diagnostics, init, setup, sync,
+    CommandOutput, Error, ExitCode, TOOL_VERSION, config, diagnostics, fs, init, setup, sync,
+    tool::Tool,
 };
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
@@ -25,6 +29,12 @@ struct Cli {
     /// Suppress normal output while preserving exit status.
     #[arg(long, global = true)]
     quiet: bool,
+    /// Print command diagnostics to stderr.
+    #[arg(long, short = 'v', global = true)]
+    verbose: bool,
+    /// Print detailed diagnostics to stderr. Implies --verbose.
+    #[arg(long, global = true)]
+    debug: bool,
     #[command(subcommand)]
     command: Commands,
 }
@@ -130,6 +140,9 @@ fn main() {
     let cli = Cli::parse();
     match run(cli) {
         Ok(out) => {
+            if !out.diagnostics.is_empty() {
+                eprintln!("{}", out.diagnostics.join("\n"));
+            }
             if !out.lines.is_empty() {
                 println!("{}", out.lines.join("\n"));
             }
@@ -147,17 +160,29 @@ fn run(cli: Cli) -> Result<CommandOutput> {
     let config_path = cli.config;
     let tools = cli.tool.as_deref().map(config::parse_tools).transpose()?;
     let tools_ref = tools.as_deref();
+    let verbosity = Verbosity {
+        verbose: cli.verbose || cli.debug,
+        debug: cli.debug,
+    };
 
     let mut out = match cli.command {
         Commands::Init(args) => {
             if let Some(raw) = args.tools.as_deref() {
                 config::parse_tools(raw)?;
             }
-            init::run(&root, args.tools.as_deref(), args.force)?
+            let mut out = init::run(&root, args.tools.as_deref(), args.force)?;
+            add_basic_diagnostics(&mut out, verbosity, "init", &root);
+            if verbosity.verbose {
+                out.diagnostic(format!(
+                    "verbose: init tools: {}",
+                    args.tools.as_deref().unwrap_or("all")
+                ));
+            }
+            out
         }
         Commands::Setup(args) => {
-            let (cfg, _) = config::load_config(&root, config_path.as_deref())?;
-            setup::run(
+            let (cfg, loaded_config_path) = config::load_config(&root, config_path.as_deref())?;
+            let mut out = setup::run(
                 &root,
                 &cfg,
                 tools_ref,
@@ -167,17 +192,28 @@ fn run(cli: Cli) -> Result<CommandOutput> {
                     force: args.force,
                     prune: args.prune,
                 },
-            )?
+            )?;
+            add_config_diagnostics(
+                &mut out,
+                verbosity,
+                "setup",
+                &root,
+                &loaded_config_path,
+                &cfg,
+                tools_ref,
+            );
+            add_setup_diagnostics(&mut out, verbosity, &args);
+            out
         }
         Commands::Sync(args) => {
-            let (cfg, _) = config::load_config(&root, config_path.as_deref())?;
+            let (cfg, loaded_config_path) = config::load_config(&root, config_path.as_deref())?;
             let event_filter = if args.event_filter.is_empty() {
                 None
             } else {
                 Some(sync::parse_event_filter(&args.event_filter)?)
             };
 
-            sync::run(
+            let mut out = sync::run(
                 &root,
                 &cfg,
                 tools_ref,
@@ -189,7 +225,18 @@ fn run(cli: Cli) -> Result<CommandOutput> {
                     json: args.json,
                     event_filter,
                 },
-            )?
+            )?;
+            add_config_diagnostics(
+                &mut out,
+                verbosity,
+                "sync",
+                &root,
+                &loaded_config_path,
+                &cfg,
+                tools_ref,
+            );
+            add_sync_diagnostics(&mut out, verbosity, &args);
+            out
         }
         Commands::Doctor(args) => {
             let path = config::resolve_config_path(&root, config_path.as_deref());
@@ -203,21 +250,229 @@ fn run(cli: Cli) -> Result<CommandOutput> {
             } else {
                 None
             };
-            diagnostics::doctor(&root, cfg.as_ref(), args.json)?
+            let mut out = diagnostics::doctor(&root, cfg.as_ref(), args.json)?;
+            add_basic_diagnostics(&mut out, verbosity, "doctor", &root);
+            if let Some(cfg) = cfg.as_ref() {
+                add_config_selection_diagnostics(&mut out, verbosity, cfg, tools_ref);
+            }
+            out
         }
         Commands::Mappings(cmd) => match cmd.command {
             MappingsSubcommand::Validate(args) => {
-                let (cfg, _) = config::load_config(&root, config_path.as_deref())?;
-                diagnostics::validate_mappings(&cfg, args.json)?
+                let (cfg, loaded_config_path) = config::load_config(&root, config_path.as_deref())?;
+                let mut out = diagnostics::validate_mappings(&cfg, args.json)?;
+                add_config_diagnostics(
+                    &mut out,
+                    verbosity,
+                    "mappings validate",
+                    &root,
+                    &loaded_config_path,
+                    &cfg,
+                    tools_ref,
+                );
+                out
             }
         },
-        Commands::Version(args) => version_output(args.json)?,
+        Commands::Version(args) => {
+            let mut out = version_output(args.json)?;
+            add_basic_diagnostics(&mut out, verbosity, "version", &root);
+            out
+        }
     };
 
     if cli.quiet {
         out.lines.clear();
     }
     Ok(out)
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Verbosity {
+    verbose: bool,
+    debug: bool,
+}
+
+fn add_basic_diagnostics(
+    out: &mut CommandOutput,
+    verbosity: Verbosity,
+    command: &str,
+    root: &Path,
+) {
+    if !verbosity.verbose {
+        return;
+    }
+    out.diagnostic(format!("verbose: command: {command}"));
+    out.diagnostic(format!("verbose: root: {}", root.display()));
+}
+
+fn add_config_diagnostics(
+    out: &mut CommandOutput,
+    verbosity: Verbosity,
+    command: &str,
+    root: &Path,
+    config_path: &Path,
+    cfg: &config::Config,
+    tools: Option<&[Tool]>,
+) {
+    add_basic_diagnostics(out, verbosity, command, root);
+    if !verbosity.verbose {
+        return;
+    }
+    out.diagnostic(format!(
+        "verbose: config: {}",
+        display_path(root, config_path)
+    ));
+    out.diagnostic(format!(
+        "verbose: manifest: {}",
+        fs::repo_path(&cfg.manifest)
+    ));
+    out.diagnostic(format!(
+        "verbose: tool filter: {}",
+        tool_filter_label(tools)
+    ));
+    add_config_selection_diagnostics(out, verbosity, cfg, tools);
+}
+
+fn add_config_selection_diagnostics(
+    out: &mut CommandOutput,
+    verbosity: Verbosity,
+    cfg: &config::Config,
+    tools: Option<&[Tool]>,
+) {
+    if !verbosity.verbose {
+        return;
+    }
+
+    let selected_symlinks = cfg
+        .symlinks
+        .iter()
+        .filter(|(link, spec)| config::symlink_selected(link, spec, tools))
+        .count();
+    let selected_generate = cfg
+        .generate
+        .values()
+        .filter(|spec| config::generate_selected(spec, tools))
+        .count();
+    let selected_merge = cfg
+        .merge
+        .iter()
+        .filter(|(id, spec)| config::merge_selected(id, spec, tools))
+        .count();
+
+    out.diagnostic(format!(
+        "verbose: selected symlinks: {selected_symlinks}/{}",
+        cfg.symlinks.len()
+    ));
+    out.diagnostic(format!(
+        "verbose: selected generate specs: {selected_generate}/{}",
+        cfg.generate.len()
+    ));
+    out.diagnostic(format!(
+        "verbose: selected merge specs: {selected_merge}/{}",
+        cfg.merge.len()
+    ));
+
+    if verbosity.debug {
+        out.diagnostic(format!(
+            "debug: selected symlinks: {}",
+            selected_keys(cfg.symlinks.iter(), |link, spec| config::symlink_selected(
+                link, spec, tools
+            ))
+        ));
+        out.diagnostic(format!(
+            "debug: selected generate specs: {}",
+            selected_keys(cfg.generate.iter(), |_, spec| {
+                config::generate_selected(spec, tools)
+            })
+        ));
+        out.diagnostic(format!(
+            "debug: selected merge specs: {}",
+            selected_keys(cfg.merge.iter(), |id, spec| config::merge_selected(
+                id, spec, tools
+            ))
+        ));
+    }
+}
+
+fn add_sync_diagnostics(out: &mut CommandOutput, verbosity: Verbosity, args: &SyncArgs) {
+    if !verbosity.verbose {
+        return;
+    }
+    out.diagnostic(format!(
+        "verbose: sync stages: {}",
+        sync_stage_labels(args).join(", ")
+    ));
+    out.diagnostic(format!("verbose: reset manifest: {}", args.reset_manifest));
+    if verbosity.debug {
+        out.diagnostic(format!("debug: import only: {}", args.import_only));
+        out.diagnostic(format!("debug: export only: {}", args.export_only));
+        out.diagnostic(format!("debug: check mode: {}", args.check));
+        out.diagnostic(format!(
+            "debug: event filter: {}",
+            if args.event_filter.is_empty() {
+                "all".to_string()
+            } else {
+                args.event_filter.join(",")
+            }
+        ));
+    }
+}
+
+fn add_setup_diagnostics(out: &mut CommandOutput, verbosity: Verbosity, args: &SetupArgs) {
+    if !verbosity.verbose {
+        return;
+    }
+    out.diagnostic(format!("verbose: no sync: {}", args.no_sync));
+    out.diagnostic(format!("verbose: prune: {}", args.prune));
+    if verbosity.debug {
+        out.diagnostic(format!("debug: check mode: {}", args.check));
+        out.diagnostic(format!("debug: force repair: {}", args.force));
+    }
+}
+
+fn sync_stage_labels(args: &SyncArgs) -> Vec<&'static str> {
+    if args.import_only {
+        vec!["import"]
+    } else if args.export_only {
+        vec!["export", "remove-stale", "sync-links", "merge"]
+    } else {
+        vec!["import", "export", "remove-stale", "sync-links", "merge"]
+    }
+}
+
+fn selected_keys<'a, T, I, F>(iter: I, selected: F) -> String
+where
+    T: 'a,
+    I: IntoIterator<Item = (&'a String, &'a T)>,
+    F: Fn(&str, &T) -> bool,
+{
+    let keys = iter
+        .into_iter()
+        .filter(|(key, spec)| selected(key, spec))
+        .map(|(key, _)| key.as_str())
+        .collect::<Vec<_>>();
+    if keys.is_empty() {
+        "(none)".to_string()
+    } else {
+        keys.join(", ")
+    }
+}
+
+fn tool_filter_label(tools: Option<&[Tool]>) -> String {
+    match tools {
+        Some(tools) => tools
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(","),
+        None => "all".to_string(),
+    }
+}
+
+fn display_path(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .map(fs::repo_path)
+        .unwrap_or_else(|_| path.display().to_string())
 }
 
 fn version_output(json_output: bool) -> Result<CommandOutput> {
@@ -227,6 +482,8 @@ fn version_output(json_output: bool) -> Result<CommandOutput> {
             "version": TOOL_VERSION,
             "commit": option_env!("GIT_SHA").unwrap_or("unknown"),
             "target": option_env!("TARGET").unwrap_or("unknown"),
+            "rustc": option_env!("RUSTC_VERSION").unwrap_or("unknown"),
+            "cargo_lock_sha256": option_env!("CARGO_LOCK_SHA256").unwrap_or("unknown"),
             "build_date": option_env!("BUILD_DATE").unwrap_or("unknown"),
         }))?);
     } else {
@@ -238,6 +495,14 @@ fn version_output(json_output: bool) -> Result<CommandOutput> {
         out.push(format!(
             "target: {}",
             option_env!("TARGET").unwrap_or("unknown")
+        ));
+        out.push(format!(
+            "rustc: {}",
+            option_env!("RUSTC_VERSION").unwrap_or("unknown")
+        ));
+        out.push(format!(
+            "cargo lock sha256: {}",
+            option_env!("CARGO_LOCK_SHA256").unwrap_or("unknown")
         ));
         out.push(format!(
             "build date: {}",

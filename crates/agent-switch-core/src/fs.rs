@@ -1,3 +1,5 @@
+//! Filesystem helpers for repository-relative paths and atomic writes.
+
 use std::{
     ffi::{OsStr, OsString},
     fs::{self, OpenOptions},

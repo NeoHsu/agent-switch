@@ -1,3 +1,5 @@
+//! Setup command implementation for native tool links and copy fallbacks.
+
 use std::{
     fs,
     path::{Component, Path, PathBuf},
@@ -243,6 +245,39 @@ fn create_link_or_fallback(link: &Path, _target: &Path, rel_target: &Path) -> Re
 fn create_link_or_fallback(link: &Path, target: &Path, rel_target: &Path) -> Result<bool> {
     use std::os::windows::fs::{symlink_dir, symlink_file};
     use std::process::Command;
+
+    create_link_or_fallback_windows(
+        link,
+        target,
+        rel_target,
+        symlink_dir,
+        symlink_file,
+        |link, target| {
+            let status = Command::new("cmd")
+                .args(["/C", "mklink", "/J"])
+                .arg(link)
+                .arg(target)
+                .status()
+                .map_err(|err| io_error("create directory junction", link, err))?;
+            Ok(status.success())
+        },
+    )
+}
+
+#[cfg(windows)]
+fn create_link_or_fallback_windows<DirSymlink, FileSymlink, Junction>(
+    link: &Path,
+    target: &Path,
+    rel_target: &Path,
+    symlink_dir: DirSymlink,
+    symlink_file: FileSymlink,
+    create_junction: Junction,
+) -> Result<bool>
+where
+    DirSymlink: FnOnce(&Path, &Path) -> std::io::Result<()>,
+    FileSymlink: FnOnce(&Path, &Path) -> std::io::Result<()>,
+    Junction: FnOnce(&Path, &Path) -> Result<bool>,
+{
     if let Some(parent) = link.parent() {
         fs::create_dir_all(parent)
             .map_err(|err| io_error("create parent directory", parent, err))?;
@@ -251,13 +286,7 @@ fn create_link_or_fallback(link: &Path, target: &Path, rel_target: &Path) -> Res
         if symlink_dir(rel_target, link).is_ok() {
             return Ok(true);
         }
-        let status = Command::new("cmd")
-            .args(["/C", "mklink", "/J"])
-            .arg(link)
-            .arg(target)
-            .status()
-            .map_err(|err| io_error("create directory junction", link, err))?;
-        if !status.success() {
+        if !create_junction(link, target)? {
             anyhow::bail!(
                 "failed to create directory junction for {}; \
                  enable Developer Mode or run as administrator to allow symlinks",
@@ -289,5 +318,61 @@ fn link_message(prefix: &str, link: &Path, rel_target: &str, is_symlink: bool) -
             "{prefix} {} (copy; symlinks unavailable — enable Developer Mode on Windows)",
             repo_path(link)
         )
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use std::{fs, io, path::Path};
+
+    use tempfile::tempdir;
+
+    use super::create_link_or_fallback_windows;
+
+    #[test]
+    fn file_symlink_failure_falls_back_to_copy() {
+        let temp = tempdir().unwrap();
+        let root = temp.path();
+        let target = root.join("target.txt");
+        let link = root.join("link.txt");
+        fs::write(&target, "content\n").unwrap();
+
+        let created_symlink = create_link_or_fallback_windows(
+            &link,
+            &target,
+            Path::new("target.txt"),
+            |_, _| unreachable!("directory symlink should not be used for files"),
+            |_, _| Err(io::Error::new(io::ErrorKind::PermissionDenied, "denied")),
+            |_, _| unreachable!("junction should not be used for files"),
+        )
+        .unwrap();
+
+        assert!(!created_symlink);
+        assert_eq!(fs::read_to_string(link).unwrap(), "content\n");
+    }
+
+    #[test]
+    fn directory_symlink_failure_uses_junction() {
+        let temp = tempdir().unwrap();
+        let root = temp.path();
+        let target = root.join("target");
+        let link = root.join("link");
+        fs::create_dir(&target).unwrap();
+
+        let created_symlink = create_link_or_fallback_windows(
+            &link,
+            &target,
+            Path::new("target"),
+            |_, _| Err(io::Error::new(io::ErrorKind::PermissionDenied, "denied")),
+            |_, _| unreachable!("file symlink should not be used for directories"),
+            |link, _| {
+                fs::create_dir(link).unwrap();
+                Ok(true)
+            },
+        )
+        .unwrap();
+
+        assert!(created_symlink);
+        assert!(link.exists());
     }
 }

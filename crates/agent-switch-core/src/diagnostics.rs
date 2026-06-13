@@ -1,3 +1,5 @@
+//! Doctor and validation commands for repository health checks.
+
 use std::path::Path;
 
 use anyhow::Result;

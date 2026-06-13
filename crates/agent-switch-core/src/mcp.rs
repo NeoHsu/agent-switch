@@ -1,3 +1,5 @@
+//! Merge helpers for Model Context Protocol configuration files.
+
 use std::{io, path::Path};
 
 use anyhow::Result;

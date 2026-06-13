@@ -1,3 +1,5 @@
+//! Repository initialization command implementation.
+
 use std::{
     collections::BTreeSet,
     fs,

@@ -1,3 +1,5 @@
+//! GitHub Copilot agent, prompt, and instruction import/export.
+
 use anyhow::Result;
 
 use super::markdown::{
