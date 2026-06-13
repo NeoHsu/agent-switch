@@ -243,15 +243,14 @@ fn create_link_or_fallback(link: &Path, _target: &Path, rel_target: &Path) -> Re
 
 #[cfg(windows)]
 fn create_link_or_fallback(link: &Path, target: &Path, rel_target: &Path) -> Result<bool> {
-    use std::os::windows::fs::{symlink_dir, symlink_file};
     use std::process::Command;
 
     create_link_or_fallback_windows(
         link,
         target,
         rel_target,
-        symlink_dir,
-        symlink_file,
+        create_dir_symlink,
+        create_file_symlink,
         |link, target| {
             let status = Command::new("cmd")
                 .args(["/C", "mklink", "/J"])
@@ -262,6 +261,16 @@ fn create_link_or_fallback(link: &Path, target: &Path, rel_target: &Path) -> Res
             Ok(status.success())
         },
     )
+}
+
+#[cfg(windows)]
+fn create_dir_symlink(rel_target: &Path, link: &Path) -> std::io::Result<()> {
+    std::os::windows::fs::symlink_dir(rel_target, link)
+}
+
+#[cfg(windows)]
+fn create_file_symlink(rel_target: &Path, link: &Path) -> std::io::Result<()> {
+    std::os::windows::fs::symlink_file(rel_target, link)
 }
 
 #[cfg(windows)]
