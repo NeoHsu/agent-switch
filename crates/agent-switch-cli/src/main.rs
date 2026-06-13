@@ -4,8 +4,8 @@ use std::{
 };
 
 use agent_switch_core::{
-    CommandOutput, Error, ExitCode, TOOL_VERSION, config, diagnostics, fs, init, setup, sync,
-    tool::Tool,
+    CommandOutput, Error, ExitCode, TOOL_VERSION, config, diagnostics, fs, init, migrate, setup,
+    sync, tool::Tool,
 };
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
@@ -20,10 +20,10 @@ struct Cli {
     /// Repository root. Defaults to the nearest directory containing .agent-switch.yaml, .agents, or .git.
     #[arg(long, global = true, env = "AGENT_SWITCH_ROOT")]
     root: Option<PathBuf>,
-    /// Path to .agent-switch.yaml. Used by setup, sync, doctor, and mappings validate.
+    /// Path to .agent-switch.yaml. Used by migrate, setup, sync, doctor, and mappings validate.
     #[arg(long, global = true, env = "AGENT_SWITCH_CONFIG")]
     config: Option<PathBuf>,
-    /// Comma-separated setup/sync tool filter (e.g. `claude,copilot`).
+    /// Comma-separated migrate/setup/sync tool filter (e.g. `claude,copilot`).
     #[arg(long, global = true, env = "AGENT_SWITCH_TOOLS")]
     tool: Option<String>,
     /// Suppress normal output while preserving exit status.
@@ -43,6 +43,8 @@ struct Cli {
 enum Commands {
     /// Create starter config, canonical directories, sample files, and .gitignore entries.
     Init(InitArgs),
+    /// Import existing native coding-agent files into canonical .agents files.
+    Migrate(MigrateArgs),
     /// Create or repair native tool links/copies, then run sync unless --no-sync is set.
     Setup(SetupArgs),
     /// Import native changes, export canonical files, merge config, and update the manifest.
@@ -63,6 +65,22 @@ struct InitArgs {
     /// Overwrite existing starter files and config.
     #[arg(long)]
     force: bool,
+}
+
+#[derive(Debug, Args)]
+struct MigrateArgs {
+    /// Report what would be imported, backed up, or linked without writing files.
+    #[arg(long)]
+    check: bool,
+    /// Overwrite conflicting canonical files and repair incorrect managed symlinks.
+    #[arg(long)]
+    force: bool,
+    /// Keep native files/directories in place, and skip the final setup pass.
+    #[arg(long)]
+    keep_native: bool,
+    /// Skip the final setup/sync pass after imports and backups.
+    #[arg(long)]
+    no_setup: bool,
 }
 
 #[derive(Debug, Args)]
@@ -178,6 +196,42 @@ fn run(cli: Cli) -> Result<CommandOutput> {
                     args.tools.as_deref().unwrap_or("all")
                 ));
             }
+            out
+        }
+        Commands::Migrate(args) => {
+            let mut out = migrate::run(
+                &root,
+                config_path.as_deref(),
+                tools_ref,
+                migrate::MigrateOptions {
+                    check: args.check,
+                    force: args.force,
+                    keep_native: args.keep_native,
+                    no_setup: args.no_setup,
+                },
+            )?;
+            let loaded_config_path = config::resolve_config_path(&root, config_path.as_deref());
+            let cfg = if loaded_config_path.exists() {
+                config::load_config(&root, config_path.as_deref())
+                    .ok()
+                    .map(|(cfg, _)| cfg)
+            } else {
+                None
+            };
+            if let Some(cfg) = cfg.as_ref() {
+                add_config_diagnostics(
+                    &mut out,
+                    verbosity,
+                    "migrate",
+                    &root,
+                    &loaded_config_path,
+                    cfg,
+                    tools_ref,
+                );
+            } else {
+                add_basic_diagnostics(&mut out, verbosity, "migrate", &root);
+            }
+            add_migrate_diagnostics(&mut out, verbosity, &args);
             out
         }
         Commands::Setup(args) => {
@@ -415,6 +469,21 @@ fn add_sync_diagnostics(out: &mut CommandOutput, verbosity: Verbosity, args: &Sy
                 args.event_filter.join(",")
             }
         ));
+    }
+}
+
+fn add_migrate_diagnostics(out: &mut CommandOutput, verbosity: Verbosity, args: &MigrateArgs) {
+    if !verbosity.verbose {
+        return;
+    }
+    out.diagnostic(format!(
+        "verbose: no setup: {}",
+        args.no_setup || args.keep_native
+    ));
+    out.diagnostic(format!("verbose: keep native: {}", args.keep_native));
+    if verbosity.debug {
+        out.diagnostic(format!("debug: check mode: {}", args.check));
+        out.diagnostic(format!("debug: force overwrite: {}", args.force));
     }
 }
 

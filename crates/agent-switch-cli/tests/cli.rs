@@ -50,6 +50,30 @@ fn doctor_json_reports_invalid_config() {
 }
 
 #[test]
+fn migrate_claude_project_from_cli() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+    fs::write(root.join("CLAUDE.md"), "# Claude\n").unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_ags"))
+        .arg("--root")
+        .arg(root)
+        .arg("--tool")
+        .arg("claude")
+        .arg("migrate")
+        .arg("--no-setup")
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        fs::read_to_string(root.join("AGENTS.md")).unwrap(),
+        "# Claude\n"
+    );
+    assert!(root.join("CLAUDE.md.bak").exists());
+}
+
+#[test]
 fn sync_reset_manifest_rebuilds_corrupt_manifest() {
     let temp = tempdir().unwrap();
     let root = temp.path();
