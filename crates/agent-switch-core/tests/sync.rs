@@ -97,6 +97,7 @@ fn full_sync_generates_outputs_and_check_passes() {
     assert!(root.join(".codex/agents/reviewer.toml").exists());
     assert!(root.join("opencode.json").exists());
     assert!(root.join(".codex/config.toml").exists());
+    assert!(root.join(".copilot/mcp-config.json").exists());
     assert!(root.join(".agents/.sync-manifest.json").exists());
 
     let second = sync::run(root, &cfg, None, SyncOptions::default()).unwrap();
@@ -359,6 +360,7 @@ fn tool_filter_only_generates_selected_tool_outputs() {
 
     assert!(root.join(".codex/agents/reviewer.toml").exists());
     assert!(root.join(".codex/config.toml").exists());
+    assert!(!root.join(".copilot/mcp-config.json").exists());
     assert!(!root.join(".github/agents/reviewer.agent.md").exists());
     assert!(!root.join(".opencode/agents/reviewer.md").exists());
 }

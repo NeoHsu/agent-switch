@@ -141,6 +141,9 @@ merge:
   codex-config:
     to: .codex/config.toml
     format: codex
+  copilot-mcp-config:
+    to: .copilot/mcp-config.json
+    format: copilot
 ```
 
 `config::validate_config` 會在 setup/sync 前執行，主要 invariants：
@@ -335,7 +338,7 @@ Manifest 檔案：`.agents/.sync-manifest.json`
     }
   },
   "links": {
-    ".copilot/mcp-config.json": "copy-fallback-sha256"
+    ".pi/mcp.json": "copy-fallback-sha256"
   },
   "meta": {
     "version": 1,
@@ -379,7 +382,8 @@ Canonical MCP config 來源是：
 Merge adapters：
 
 - OpenCode：將 `mcpServers` 轉成 `opencode.json` 的 `mcp` object，並保留/建立 `instructions`。
-- Codex：將 MCP servers render 成 TOML，寫入 `.codex/config.toml` 的 marker block：
+- Copilot：將 `mcpServers` 轉成 `.copilot/mcp-config.json`，為每個 server 補上 Copilot 需要的 `type` 與 `tools` 欄位。
+- Codex：將 MCP servers render 成 TOML，寫入 `.codex/config.toml` 的 marker block，支援 stdio 與 Streamable HTTP server：
 
 ```toml
 # >>> agent-switch:mcp >>>

@@ -90,6 +90,21 @@ fn init_with_tools_filters_default_mappings() {
 }
 
 #[test]
+fn init_with_copilot_uses_mcp_merge_instead_of_symlink() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+
+    init::run(root, Some("copilot"), false).unwrap();
+    let cfg = config::load_config(root, None).unwrap().0;
+
+    assert!(!cfg.symlinks.contains_key(".copilot/mcp-config.json"));
+    assert_eq!(
+        cfg.merge.keys().map(String::as_str).collect::<Vec<_>>(),
+        vec!["copilot-mcp-config"]
+    );
+}
+
+#[test]
 fn config_loads_detailed_symlink_specs() {
     let temp = tempdir().unwrap();
     let root = temp.path();
@@ -266,12 +281,12 @@ fn setup_check_reports_existing_real_file_as_drift() {
     let temp = tempdir().unwrap();
     let root = temp.path();
     let cfg = fixture(root);
-    write(&root.join(".copilot/mcp-config.json"), "real file\n");
+    write(&root.join(".pi/mcp.json"), "real file\n");
 
     let out = setup::run(
         root,
         &cfg,
-        Some(&[Tool::Copilot]),
+        Some(&[Tool::Pi]),
         SetupOptions {
             no_sync: true,
             check: true,
@@ -282,7 +297,7 @@ fn setup_check_reports_existing_real_file_as_drift() {
 
     assert_eq!(out.exit(), ExitCode::Drift);
     assert!(out.lines.iter().any(|line| {
-        line.starts_with("skipped  .copilot/mcp-config.json: existing real file or directory")
+        line.starts_with("skipped  .pi/mcp.json: existing real file or directory")
     }));
 }
 
@@ -302,7 +317,6 @@ fn setup_prune_removes_links_for_unselected_tools() {
         },
     )
     .unwrap();
-    assert_managed_link(&root.join(".copilot/mcp-config.json"));
     assert_managed_link(&root.join(".pi/mcp.json"));
     assert_managed_link(&root.join(".claude/skills"));
 
@@ -318,13 +332,7 @@ fn setup_prune_removes_links_for_unselected_tools() {
     )
     .unwrap();
 
-    assert!(
-        out.lines
-            .iter()
-            .any(|line| line == "removed: .copilot/mcp-config.json")
-    );
     assert!(out.lines.iter().any(|line| line == "removed: .pi/mcp.json"));
-    assert_absent(&root.join(".copilot/mcp-config.json"));
     assert_absent(&root.join(".pi/mcp.json"));
     assert_managed_link(&root.join(".claude/skills"));
     assert_managed_link(&root.join(".mcp.json"));
@@ -416,7 +424,7 @@ fn setup_prune_skips_unmanaged_real_directories() {
     let temp = tempdir().unwrap();
     let root = temp.path();
     let cfg = fixture(root);
-    fs::create_dir_all(root.join(".copilot/mcp-config.json")).unwrap();
+    fs::create_dir_all(root.join(".pi/mcp.json")).unwrap();
 
     let out = setup::run(
         root,
@@ -431,9 +439,9 @@ fn setup_prune_skips_unmanaged_real_directories() {
     .unwrap();
 
     assert!(out.lines.iter().any(|line| {
-        line.starts_with("skipped  .copilot/mcp-config.json: existing real file or directory")
+        line.starts_with("skipped  .pi/mcp.json: existing real file or directory")
     }));
-    assert!(root.join(".copilot/mcp-config.json").is_dir());
+    assert!(root.join(".pi/mcp.json").is_dir());
 }
 
 #[test]
@@ -441,12 +449,11 @@ fn setup_prune_removes_manifest_tracked_copy_fallback() {
     let temp = tempdir().unwrap();
     let root = temp.path();
     let cfg = fixture(root);
-    write(&root.join(".copilot/mcp-config.json"), "{}\n");
+    write(&root.join(".pi/mcp.json"), "{}\n");
     let mut sync_manifest = Manifest::default();
-    sync_manifest.links.insert(
-        ".copilot/mcp-config.json".into(),
-        manifest::sha256_text("{}\n"),
-    );
+    sync_manifest
+        .links
+        .insert(".pi/mcp.json".into(), manifest::sha256_text("{}\n"));
     manifest::save(
         &root.join(".agents/.sync-manifest.json"),
         &mut sync_manifest,
@@ -465,14 +472,10 @@ fn setup_prune_removes_manifest_tracked_copy_fallback() {
     )
     .unwrap();
 
-    assert!(
-        out.lines
-            .iter()
-            .any(|line| line == "removed: .copilot/mcp-config.json")
-    );
-    assert_absent(&root.join(".copilot/mcp-config.json"));
+    assert!(out.lines.iter().any(|line| line == "removed: .pi/mcp.json"));
+    assert_absent(&root.join(".pi/mcp.json"));
     let next_manifest = manifest::load(&root.join(".agents/.sync-manifest.json")).unwrap();
-    assert!(!next_manifest.links.contains_key(".copilot/mcp-config.json"));
+    assert!(!next_manifest.links.contains_key(".pi/mcp.json"));
 }
 
 #[test]
@@ -506,5 +509,5 @@ fn setup_check_prune_reports_drift_without_removing() {
     .unwrap();
 
     assert_eq!(out.exit(), ExitCode::Drift);
-    assert_managed_link(&root.join(".copilot/mcp-config.json"));
+    assert_managed_link(&root.join(".pi/mcp.json"));
 }

@@ -132,7 +132,6 @@ const DEFAULT_SYMLINKS: &[(&str, &str)] = &[
     (".agent/workflows", ".agents/commands"),
     (".agent/skills", ".agents/skills"),
     (".mcp.json", ".agents/mcp.json"),
-    (".copilot/mcp-config.json", ".agents/mcp.json"),
     (".pi/mcp.json", ".agents/mcp.json"),
     ("CLAUDE.md", "AGENTS.md"),
 ];
@@ -183,6 +182,11 @@ const DEFAULT_GENERATE: &[(&str, &str, &str, Format, &str, bool)] = &[
 const DEFAULT_MERGE: &[(&str, &str, MergeFormat)] = &[
     ("opencode-config", "opencode.json", MergeFormat::Opencode),
     ("codex-config", ".codex/config.toml", MergeFormat::Codex),
+    (
+        "copilot-mcp-config",
+        ".copilot/mcp-config.json",
+        MergeFormat::Copilot,
+    ),
 ];
 
 impl Default for Config {

@@ -107,6 +107,7 @@ impl FromStr for Format {
 pub enum MergeFormat {
     Opencode,
     Codex,
+    Copilot,
 }
 
 impl MergeFormat {
@@ -114,6 +115,7 @@ impl MergeFormat {
         match self {
             MergeFormat::Opencode => "opencode",
             MergeFormat::Codex => "codex",
+            MergeFormat::Copilot => "copilot",
         }
     }
 
@@ -121,6 +123,7 @@ impl MergeFormat {
         match self {
             MergeFormat::Opencode => Tool::Opencode,
             MergeFormat::Codex => Tool::Codex,
+            MergeFormat::Copilot => Tool::Copilot,
         }
     }
 }
