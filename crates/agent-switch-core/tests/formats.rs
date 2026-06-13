@@ -19,8 +19,7 @@ fn codex_agent_round_trips() {
 
 #[test]
 fn codex_agent_export_keeps_numeric_values() {
-    let canonical =
-        "---\nname: tuner\ncodex:\n  temperature: 0.5\n  limits:\n  - 1\n  - 2.5\n---\nBody.\n";
+    let canonical = "---\nname: tuner\ndescription: Tunes settings.\ncodex:\n  temperature: 0.5\n  limits:\n  - 1\n  - 2.5\n---\nBody.\n";
 
     let exported = Format::CodexAgent.export(canonical).unwrap();
     assert!(exported.contains("temperature = 0.5"));
@@ -31,6 +30,7 @@ fn codex_agent_export_keeps_numeric_values() {
 fn codex_agent_preserves_nested_namespace_values() {
     let canonical = r#"---
 name: nested
+description: Preserves nested values.
 codex:
   profile:
     enabled: true
@@ -58,6 +58,26 @@ Body.
     assert!(imported.contains("2.5"));
     assert!(imported.contains("modes:"));
     assert!(imported.contains("name: fast"));
+}
+
+#[test]
+fn codex_agent_requires_name_description_and_body() {
+    let missing_name = "---\ndescription: Reviews code.\n---\nReview.\n";
+    let missing_description = "---\nname: reviewer\n---\nReview.\n";
+    let empty_body = "---\nname: reviewer\ndescription: Reviews code.\n---\n";
+
+    let err = Format::CodexAgent.export(missing_name).unwrap_err();
+    assert!(err.to_string().contains("codex-agent requires `name`"));
+    let err = Format::CodexAgent.export(missing_description).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("codex-agent requires `description`")
+    );
+    let err = Format::CodexAgent.export(empty_body).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("codex-agent requires non-empty developer instructions")
+    );
 }
 
 #[test]
@@ -92,6 +112,22 @@ fn copilot_agent_round_trips_namespace() {
         .import(Path::new(".github/agents/fixer.agent.md"), &exported)
         .unwrap();
     assert_eq!(imported, canonical);
+}
+
+#[test]
+fn copilot_agent_requires_name_and_description() {
+    let missing_name = "---\ndescription: Fixes issues.\n---\nFix it.\n";
+    let missing_description = "---\nname: fixer\n---\nFix it.\n";
+
+    let err = Format::CopilotAgent.export(missing_name).unwrap_err();
+    assert!(err.to_string().contains("copilot-agent requires `name`"));
+    let err = Format::CopilotAgent
+        .export(missing_description)
+        .unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("copilot-agent requires `description`")
+    );
 }
 
 #[test]

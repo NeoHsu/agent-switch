@@ -47,6 +47,13 @@ Generated outputs:
 | OpenCode | `.opencode/agents/reviewer.md` |
 | Codex | `.codex/agents/reviewer.toml` |
 
+Validation:
+
+| Target format | Required canonical fields |
+| --- | --- |
+| `copilot-agent` | non-empty `name`, non-empty `description` |
+| `codex-agent` | non-empty `name`, non-empty `description`, non-empty Markdown body |
+
 Tool-specific generated edits can be imported back into the canonical file. If
 both the canonical and generated file changed since the manifest was written,
 the current import behavior chooses the tool-side content for that tool while

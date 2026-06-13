@@ -4,10 +4,21 @@ use anyhow::Result;
 use noyalib::{Mapping, Value};
 use toml_edit::{DocumentMut, InlineTable, Item, Table, value};
 
+use crate::Error;
+
 use super::markdown::{self, render, set_string};
 
 pub fn export_agent(source: &str) -> Result<String> {
     let doc = markdown::parse(source)?;
+    require_string(&doc.frontmatter, "name", "codex-agent")?;
+    require_string(&doc.frontmatter, "description", "codex-agent")?;
+    if doc.body.trim().is_empty() {
+        return Err(Error::Config(
+            "codex-agent requires non-empty developer instructions in the markdown body".into(),
+        )
+        .into());
+    }
+
     let mut out = DocumentMut::new();
     if let Some(name) = markdown::str_value(&doc.frontmatter, "name") {
         out["name"] = value(name);
@@ -59,6 +70,13 @@ fn yaml_to_toml(yaml_value: Value) -> Item {
             Item::Table(table)
         }
         other => Item::Value(yaml_to_toml_value(other)),
+    }
+}
+
+fn require_string(map: &Mapping, key: &str, format: &str) -> Result<()> {
+    match markdown::str_value(map, key) {
+        Some(value) if !value.trim().is_empty() => Ok(()),
+        _ => Err(Error::Config(format!("{format} requires `{key}`")).into()),
     }
 }
 

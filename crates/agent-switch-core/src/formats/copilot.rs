@@ -2,13 +2,17 @@
 
 use anyhow::Result;
 
+use crate::Error;
+
 use super::markdown::{
     self, apply_to_to_paths, base_with_namespace, canonical_with_tool_ns, paths_to_apply_to,
-    render, set_string,
+    render, set_string, str_value,
 };
 
 pub fn export_agent(source: &str) -> Result<String> {
     let doc = markdown::parse(source)?;
+    require_string(&doc.frontmatter, "name", "copilot-agent")?;
+    require_string(&doc.frontmatter, "description", "copilot-agent")?;
     let fm = base_with_namespace(&doc.frontmatter, "copilot", &["name", "description"]);
     render(fm, &doc.body)
 }
@@ -59,4 +63,11 @@ pub fn import_instructions(source: &str) -> Result<String> {
         .map(ToOwned::to_owned);
     apply_to_to_paths(apply_to, &mut fm);
     render(fm, &doc.body)
+}
+
+fn require_string(map: &noyalib::Mapping, key: &str, format: &str) -> Result<()> {
+    match str_value(map, key) {
+        Some(value) if !value.trim().is_empty() => Ok(()),
+        _ => Err(Error::Config(format!("{format} requires `{key}`")).into()),
+    }
 }
