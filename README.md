@@ -7,6 +7,7 @@ The binary name is `ags`.
 
 For maintainers, see [`docs/architecture.md`](docs/architecture.md) for the
 workspace layout, sync pipeline, manifest semantics, and extension points.
+For CLI workflows and option semantics, see [`docs/cli-usage.md`](docs/cli-usage.md).
 
 ## Commands
 
@@ -27,6 +28,9 @@ ags doctor
 ags mappings validate
 ags version
 ```
+
+See [`docs/cli-usage.md`](docs/cli-usage.md) for the full scenario guide,
+including bootstrap, tool switching, drift checks, JSON output, and CI usage.
 
 Global options:
 

@@ -13,13 +13,16 @@ use clap::{Args, Parser, Subcommand};
     about = "Synchronize canonical .agents files with coding agent native formats."
 )]
 struct Cli {
+    /// Repository root. Defaults to the nearest directory containing .agent-switch.yaml, .agents, or .git.
     #[arg(long, global = true, env = "AGENT_SWITCH_ROOT")]
     root: Option<PathBuf>,
+    /// Path to .agent-switch.yaml. Used by setup, sync, doctor, and mappings validate.
     #[arg(long, global = true, env = "AGENT_SWITCH_CONFIG")]
     config: Option<PathBuf>,
-    /// Comma-separated list of tools to target (e.g. `claude,copilot`).
+    /// Comma-separated setup/sync tool filter (e.g. `claude,copilot`).
     #[arg(long, global = true, env = "AGENT_SWITCH_TOOLS")]
     tool: Option<String>,
+    /// Suppress normal output while preserving exit status.
     #[arg(long, global = true)]
     quiet: bool,
     #[command(subcommand)]
@@ -28,42 +31,58 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
+    /// Create starter config, canonical directories, sample files, and .gitignore entries.
     Init(InitArgs),
+    /// Create or repair native tool links/copies, then run sync unless --no-sync is set.
     Setup(SetupArgs),
+    /// Import native changes, export canonical files, merge config, and update the manifest.
     Sync(SyncArgs),
+    /// Inspect config, links, manifest, and generated-file drift.
     Doctor(DoctorArgs),
+    /// Validate configured symlink/generate/merge mappings.
     Mappings(MappingsCommand),
+    /// Print build version metadata.
     Version(VersionArgs),
 }
 
 #[derive(Debug, Args)]
 struct InitArgs {
+    /// Write default mappings only for this comma-separated tool list.
     #[arg(long)]
     tools: Option<String>,
+    /// Overwrite existing starter files and config.
     #[arg(long)]
     force: bool,
 }
 
 #[derive(Debug, Args)]
 struct SetupArgs {
+    /// Only create/repair links and copy fallbacks; skip the automatic sync step.
     #[arg(long)]
     no_sync: bool,
+    /// Report drift without writing files. Exits with the drift code when changes are needed.
     #[arg(long)]
     check: bool,
+    /// Repair incorrect managed symlinks. Real files and directories are still preserved.
     #[arg(long)]
     force: bool,
+    /// Remove managed links/copies for unselected tools when --tool is used.
     #[arg(long)]
     prune: bool,
 }
 
 #[derive(Debug, Args)]
 struct SyncArgs {
+    /// Report generated-file drift without writing files. Exits with the drift code on changes.
     #[arg(long)]
     check: bool,
+    /// Import native generated files back into canonical .agents files only.
     #[arg(long, conflicts_with = "export_only")]
     import_only: bool,
+    /// Export canonical .agents files to native tool formats only.
     #[arg(long, conflicts_with = "import_only")]
     export_only: bool,
+    /// Emit a deterministic machine-readable sync report.
     #[arg(long)]
     json: bool,
     /// Comma-separated event types to include in sync output (e.g. `generated,merged`).
@@ -73,12 +92,14 @@ struct SyncArgs {
 
 #[derive(Debug, Args)]
 struct DoctorArgs {
+    /// Emit diagnostics as JSON.
     #[arg(long)]
     json: bool,
 }
 
 #[derive(Debug, Subcommand)]
 enum MappingsSubcommand {
+    /// Validate config mapping sections without running setup or sync.
     Validate(JsonArg),
 }
 
@@ -90,12 +111,14 @@ struct MappingsCommand {
 
 #[derive(Debug, Args)]
 struct JsonArg {
+    /// Emit validation output as JSON.
     #[arg(long)]
     json: bool,
 }
 
 #[derive(Debug, Args)]
 struct VersionArgs {
+    /// Emit version metadata as JSON.
     #[arg(long)]
     json: bool,
 }
