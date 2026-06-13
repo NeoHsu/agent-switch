@@ -120,6 +120,19 @@ symlinks:
 }
 
 #[test]
+fn config_missing_suggests_init() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+
+    let err = config::load_config(root, None).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "No config file found. Run 'ags init' to create one."
+    );
+}
+
+#[test]
 fn config_rejects_path_traversal() {
     let temp = tempdir().unwrap();
     let root = temp.path();
@@ -198,6 +211,51 @@ agents_dir: custom-agents
         out.lines
             .iter()
             .any(|line| line == "ok       custom-agents exists")
+    );
+}
+
+#[test]
+fn doctor_reports_manifest_recovery_hint() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+    let cfg = fixture(root);
+    write(&root.join(".agents/.sync-manifest.json"), "{not json\n");
+
+    let out = diagnostics::doctor(root, Some(&cfg), false).unwrap();
+
+    assert!(
+        out.lines.iter().any(|line| {
+            line == "warning: manifest is not parseable: .agents/.sync-manifest.json"
+        })
+    );
+    assert!(out.lines.iter().any(|line| {
+        line == "hint:    delete .agents/.sync-manifest.json and run `ags sync` to rebuild it"
+    }));
+}
+
+#[test]
+fn doctor_json_reports_manifest_recovery_hint() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+    let cfg = fixture(root);
+    write(&root.join(".agents/.sync-manifest.json"), "{not json\n");
+
+    let out = diagnostics::doctor(root, Some(&cfg), true).unwrap();
+    let report: serde_json::Value = serde_json::from_str(&out.lines[0]).unwrap();
+
+    assert_eq!(report["manifest"].as_bool(), Some(false));
+    assert_eq!(
+        report["manifest_path"].as_str(),
+        Some(".agents/.sync-manifest.json")
+    );
+    assert!(
+        report["manifest_error"]
+            .as_str()
+            .is_some_and(|err| err.contains("manifest is not parseable"))
+    );
+    assert_eq!(
+        report["manifest_recovery"].as_str(),
+        Some("Delete .agents/.sync-manifest.json and run `ags sync` to rebuild it.")
     );
 }
 

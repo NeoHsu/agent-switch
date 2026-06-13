@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    env,
+    env, io,
     path::{Component, Path, PathBuf},
     str::FromStr,
 };
@@ -246,8 +246,13 @@ pub fn resolve_config_path(root: &Path, explicit: Option<&Path>) -> PathBuf {
 
 pub fn load_config(root: &Path, explicit: Option<&Path>) -> Result<(Config, PathBuf)> {
     let path = resolve_config_path(root, explicit);
-    let content = read_text(&path)
-        .map_err(|err| Error::Config(format!("failed to read config {}: {err}", path.display())))?;
+    let content = read_text(&path).map_err(|err| {
+        if err.kind() == io::ErrorKind::NotFound {
+            Error::Config("No config file found. Run 'ags init' to create one.".into())
+        } else {
+            Error::Config(format!("failed to read config {}: {err}", path.display()))
+        }
+    })?;
     let cfg: Config = noyalib::from_str(&content)
         .map_err(|err| Error::Config(format!("invalid config {}: {err}", path.display())))?;
     validate_config(&cfg)?;

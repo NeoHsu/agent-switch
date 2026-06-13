@@ -50,7 +50,7 @@ pub fn write_if_changed(path: &Path, content: &str) -> Result<bool> {
             atomic_write(path, content.as_bytes())?;
             Ok(true)
         }
-        Err(err) => Err(err.into()),
+        Err(err) => Err(io_error("read existing file", path, err)),
     }
 }
 
@@ -59,7 +59,7 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
-    fs::create_dir_all(parent)?;
+    fs::create_dir_all(parent).map_err(|err| io_error("create parent directory", parent, err))?;
 
     let file_name = path.file_name().ok_or_else(|| {
         io::Error::new(
@@ -84,18 +84,18 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
                 last_collision = Some(err);
                 continue;
             }
-            Err(err) => return Err(err.into()),
+            Err(err) => return Err(io_error("create temporary file", &temp_path, err)),
         };
 
         if let Err(err) = file.write_all(bytes).and_then(|()| file.sync_all()) {
             let _ = fs::remove_file(&temp_path);
-            return Err(err.into());
+            return Err(io_error("write temporary file", &temp_path, err));
         }
         drop(file);
 
         if let Err(err) = replace_file(&temp_path, path) {
             let _ = fs::remove_file(&temp_path);
-            return Err(err.into());
+            return Err(io_error("replace file", path, err));
         }
         return Ok(());
     }
@@ -162,17 +162,19 @@ pub fn is_fake_symlink(path: &Path, target_rel: &Path, target_cfg: &str) -> bool
 }
 
 pub fn remove_file_or_empty_dir(path: &Path) -> Result<()> {
-    let Ok(metadata) = fs::symlink_metadata(path) else {
-        return Ok(());
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => return Err(io_error("inspect path before removal", path, err)),
     };
     let file_type = metadata.file_type();
 
     if file_type.is_symlink() {
-        remove_symlink(path, &file_type)?;
+        remove_symlink(path, &file_type).map_err(|err| io_error("remove symlink", path, err))?;
     } else if file_type.is_dir() {
-        fs::remove_dir(path)?;
+        fs::remove_dir(path).map_err(|err| io_error("remove empty directory", path, err))?;
     } else {
-        fs::remove_file(path)?;
+        fs::remove_file(path).map_err(|err| io_error("remove file", path, err))?;
     }
     Ok(())
 }
@@ -195,8 +197,21 @@ fn remove_symlink(path: &Path, _file_type: &fs::FileType) -> io::Result<()> {
 
 pub fn copy_file(src: &Path, dest: &Path) -> Result<()> {
     if let Some(parent) = dest.parent() {
-        fs::create_dir_all(parent)?;
+        fs::create_dir_all(parent)
+            .map_err(|err| io_error("create parent directory", parent, err))?;
     }
-    fs::copy(src, dest)?;
+    fs::copy(src, dest)
+        .map_err(|err| io_error(&format!("copy {} to", src.display()), dest, err))?;
     Ok(())
+}
+
+pub fn io_error(action: &str, path: &Path, err: io::Error) -> anyhow::Error {
+    if err.kind() == io::ErrorKind::PermissionDenied {
+        anyhow::anyhow!(
+            "permission denied while trying to {action} {}: {err}",
+            path.display()
+        )
+    } else {
+        err.into()
+    }
 }

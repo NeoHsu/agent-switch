@@ -115,6 +115,20 @@ fn full_sync_generates_outputs_and_check_passes() {
 }
 
 #[test]
+fn sync_reports_manifest_recovery_hint() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+    let cfg = fixture(root);
+    write(&root.join(".agents/.sync-manifest.json"), "{not json\n");
+
+    let err = sync::run(root, &cfg, None, SyncOptions::default()).unwrap_err();
+    let message = format!("{err:#}");
+
+    assert!(message.contains("failed to read manifest .agents/.sync-manifest.json"));
+    assert!(message.contains("Delete it and run `ags sync` to rebuild it."));
+}
+
+#[test]
 fn sync_can_output_machine_readable_json() {
     let temp = tempdir().unwrap();
     let root = temp.path();

@@ -9,7 +9,7 @@ use anyhow::Result;
 use crate::{
     CommandOutput,
     config::{self, CONFIG_FILE, Config, write_config},
-    fs::write_if_changed,
+    fs::{io_error, write_if_changed},
     mcp,
     tool::Tool,
 };
@@ -96,7 +96,7 @@ fn create_dir(root: &Path, path: &Path, out: &mut CommandOutput) -> Result<()> {
     if path.exists() {
         out.push(format!("ok       {}", rel(root, path)));
     } else {
-        fs::create_dir_all(path)?;
+        fs::create_dir_all(path).map_err(|err| io_error("create directory", path, err))?;
         out.push(format!("created  {}", rel(root, path)));
     }
     Ok(())
@@ -136,7 +136,7 @@ fn update_gitignore(root: &Path, out: &mut CommandOutput) -> Result<()> {
     let current = match fs::read_to_string(&path) {
         Ok(current) => current,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(err) => return Err(err.into()),
+        Err(err) => return Err(io_error("read existing file", &path, err)),
     };
     if current.contains("# >>> agent-switch >>>") {
         out.push("ok       .gitignore");

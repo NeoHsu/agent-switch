@@ -11,7 +11,7 @@ mod report;
 mod stage;
 mod stages;
 
-use crate::fs::abs;
+use crate::fs::{abs, repo_path};
 use crate::sync::stages::{ExportStage, ImportStage, MergeStage, RemoveStaleStage, SyncLinksStage};
 use context::SyncContext;
 use event::SyncEvent;
@@ -47,7 +47,9 @@ pub fn run(
     }
 
     let manifest_path = abs(root, &cfg.manifest);
-    let mut manifest = manifest::load(&manifest_path).context("failed to read manifest")?;
+    let manifest_path_display = repo_path(&cfg.manifest);
+    let mut manifest = manifest::load(&manifest_path)
+        .with_context(|| format!("failed to read manifest {manifest_path_display}"))?;
     let plan = SyncPlan::build(root, cfg, tools)?;
     let ctx = SyncContext::new(root, cfg, tools, opts.check);
 

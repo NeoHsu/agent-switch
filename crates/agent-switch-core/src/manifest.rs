@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    TOOL_VERSION,
-    fs::{atomic_write, read_text},
+    Error, TOOL_VERSION,
+    fs::{atomic_write, io_error, read_text},
 };
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
@@ -47,8 +47,13 @@ pub fn load(path: &Path) -> Result<Manifest> {
     if !path.exists() {
         return Ok(Manifest::default());
     }
-    let content = read_text(path)?;
-    let mut manifest: Manifest = serde_json::from_str(&content)?;
+    let content = read_text(path).map_err(|err| io_error("read manifest", path, err))?;
+    let mut manifest: Manifest = serde_json::from_str(&content).map_err(|err| {
+        Error::Config(format!(
+            "manifest is not parseable: {}: {err}. Delete it and run `ags sync` to rebuild it.",
+            path.display()
+        ))
+    })?;
     if manifest.meta.tool.is_empty() {
         manifest.meta = ManifestMeta::default();
     }

@@ -8,7 +8,7 @@ use anyhow::Result;
 use crate::{
     CommandOutput, ExitCode,
     config::{self, Config},
-    fs::{abs, is_fake_symlink, relative_link, remove_file_or_empty_dir, repo_path},
+    fs::{abs, io_error, is_fake_symlink, relative_link, remove_file_or_empty_dir, repo_path},
     manifest, sync,
     tool::Tool,
 };
@@ -231,9 +231,11 @@ fn normalize_lexical(path: &Path) -> PathBuf {
 #[cfg(unix)]
 fn create_link_or_fallback(link: &Path, _target: &Path, rel_target: &Path) -> Result<bool> {
     if let Some(parent) = link.parent() {
-        fs::create_dir_all(parent)?;
+        fs::create_dir_all(parent)
+            .map_err(|err| io_error("create parent directory", parent, err))?;
     }
-    std::os::unix::fs::symlink(rel_target, link)?;
+    std::os::unix::fs::symlink(rel_target, link)
+        .map_err(|err| io_error("create symlink", link, err))?;
     Ok(true)
 }
 
@@ -242,7 +244,8 @@ fn create_link_or_fallback(link: &Path, target: &Path, rel_target: &Path) -> Res
     use std::os::windows::fs::{symlink_dir, symlink_file};
     use std::process::Command;
     if let Some(parent) = link.parent() {
-        fs::create_dir_all(parent)?;
+        fs::create_dir_all(parent)
+            .map_err(|err| io_error("create parent directory", parent, err))?;
     }
     if target.is_dir() {
         if symlink_dir(rel_target, link).is_ok() {
@@ -252,7 +255,8 @@ fn create_link_or_fallback(link: &Path, target: &Path, rel_target: &Path) -> Res
             .args(["/C", "mklink", "/J"])
             .arg(link)
             .arg(target)
-            .status()?;
+            .status()
+            .map_err(|err| io_error("create directory junction", link, err))?;
         if !status.success() {
             anyhow::bail!(
                 "failed to create directory junction for {}; \

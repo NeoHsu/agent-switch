@@ -179,6 +179,25 @@ ags --config configs/agent-switch.yaml doctor
 ags --config configs/agent-switch.yaml mappings validate
 ```
 
+## Recovery Cases
+
+If no config file exists, initialize the repository first:
+
+```bash
+ags init
+```
+
+If the sync manifest is corrupt, rebuild it from the working tree:
+
+```bash
+rm .agents/.sync-manifest.json
+ags sync
+```
+
+`ags doctor` reports the manifest path and the same recovery hint. Permission
+errors include the attempted action and path, for example creating a parent
+directory, creating a symlink, or replacing a generated file.
+
 ## Version Metadata
 
 Print human-readable build metadata:

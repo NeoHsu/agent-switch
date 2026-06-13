@@ -21,11 +21,18 @@ pub fn doctor(root: &Path, cfg: Option<&Config>, json_output: bool) -> Result<Co
     let manifest_path = cfg
         .map(|c| abs(root, &c.manifest))
         .unwrap_or_else(|| root.join(agents_dir).join(".sync-manifest.json"));
-    let manifest_ok = if manifest_path.exists() {
-        manifest::load(&manifest_path).is_ok()
+    let manifest_error = if manifest_path.exists() {
+        manifest::load(&manifest_path)
+            .err()
+            .map(|err| err.to_string())
     } else {
-        true
+        None
     };
+    let manifest_ok = manifest_error.is_none();
+    let manifest_path_display = display_path(root, &manifest_path);
+    let manifest_recovery = manifest_error
+        .as_ref()
+        .map(|_| format!("Delete {manifest_path_display} and run `ags sync` to rebuild it."));
 
     if json_output {
         out.push(serde_json::to_string_pretty(&json!({
@@ -34,6 +41,9 @@ pub fn doctor(root: &Path, cfg: Option<&Config>, json_output: bool) -> Result<Co
             "agents_dir_path": repo_path(agents_dir),
             "config": config_exists,
             "manifest": manifest_ok,
+            "manifest_path": manifest_path_display,
+            "manifest_error": manifest_error.as_deref(),
+            "manifest_recovery": manifest_recovery.as_deref(),
         }))?);
         return Ok(out);
     }
@@ -53,7 +63,15 @@ pub fn doctor(root: &Path, cfg: Option<&Config>, json_output: bool) -> Result<Co
     if manifest_ok {
         out.push("ok       manifest parseable");
     } else {
-        out.push("warning: manifest is not parseable");
+        out.push(format!(
+            "warning: manifest is not parseable: {manifest_path_display}"
+        ));
+        if let Some(err) = manifest_error {
+            out.push(format!("error:   {err}"));
+        }
+        out.push(format!(
+            "hint:    delete {manifest_path_display} and run `ags sync` to rebuild it"
+        ));
     }
     if let Some(cfg) = cfg {
         for (link, spec) in &cfg.symlinks {
@@ -63,6 +81,10 @@ pub fn doctor(root: &Path, cfg: Option<&Config>, json_output: bool) -> Result<Co
             } else {
                 out.push(format!("warning: {} is missing", link));
             }
+        }
+        if !manifest_ok {
+            out.push("warning: generated file drift check skipped until manifest is repaired");
+            return Ok(out);
         }
         let check = sync::run(
             root,
