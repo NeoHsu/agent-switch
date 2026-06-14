@@ -7,9 +7,11 @@ formats used by coding-agent tools.
 
 The current command surface is small enough to keep as-is:
 
-- `init` is for first-time repository bootstrapping.
-- `migrate` is for importing existing native tool files into canonical
-  `.agents/` files before switching to managed links/generated outputs.
+- `init` is for greenfield canonical-first bootstrapping when there are no
+  native agent files to import yet.
+- `migrate` is the recommended onboarding path for repositories that already
+  have native tool files, or teams that prefer to use coding-agent tools first
+  and consolidate them later.
 - `setup` is for preparing native tool entry points and optionally pruning old
   managed links.
 - `sync` is for converting between canonical `.agents/` files and native tool
@@ -46,10 +48,38 @@ common options consistently before or after subcommands.
 Verbose and debug diagnostics are written to stderr, so JSON stdout remains
 machine-readable.
 
-## First-Time Setup
+## Choosing `init` vs `migrate`
+
+Use `migrate` as the normal onboarding path when a repository already has native
+coding-agent files, or when developers first use those tools and later decide to
+standardize on `.agents/`.
+
+Use `init` only when the repository has no native agent files yet and you want to
+author `.agents/` first.
+
+```text
+Repo has native agent files?
+  examples: .claude/, .codex/, .github/agents/, .opencode/, CLAUDE.md
+        |
+   +----+----+
+   |         |
+  yes        no
+   |         |
+   v         v
+ags migrate  Want to create .agents/ now?
+             |
+        +----+----+
+        |         |
+       yes        no
+        |         |
+        v         v
+     ags init   no ags command yet
+```
+
+## Canonical-First Initialization
 
 Create the default config, sample canonical files, directories, and `.gitignore`
-entries:
+entries for a new repo that has no native files to import:
 
 ```bash
 ags init
@@ -74,7 +104,8 @@ starter config that gets written. Global `--tool` is a runtime filter for
 ## Migrating Existing Native Tool Files
 
 Import existing Claude, Codex, Copilot, OpenCode, Pi, and Antigravity native
-files into the canonical layout, back up managed native paths, then run setup:
+files into the canonical layout, back up managed native paths, then run setup.
+This is the preferred first `ags` command for native-first repositories:
 
 ```bash
 ags migrate
@@ -237,9 +268,13 @@ ags --config configs/agent-switch.yaml mappings validate
 
 ## Recovery Cases
 
-If no config file exists, initialize the repository first:
+If no config file exists, choose the onboarding path that matches the repository:
 
 ```bash
+# Existing native agent files, or native-first workflow
+ags migrate
+
+# No native files yet, and you want a canonical .agents/ skeleton
 ags init
 ```
 
@@ -275,7 +310,15 @@ version string is enough.
 
 ## CI Patterns
 
-Recommended drift check:
+Recommended canonical-only drift check when `.agents/` is the source of truth and
+native generated files should not be imported back:
+
+```bash
+ags sync --check --export-only
+```
+
+Recommended full drift check when tool-side generated edits are allowed to import
+back into `.agents/`:
 
 ```bash
 ags sync --check
@@ -284,7 +327,7 @@ ags sync --check
 Recommended machine-readable drift check:
 
 ```bash
-ags sync --check --json --event-filter drift,synced_no_changes
+ags sync --check --export-only --json --event-filter drift,synced_no_changes
 ```
 
 Recommended config preflight:

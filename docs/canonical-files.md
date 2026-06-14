@@ -14,7 +14,9 @@ converts those files into each supported tool's native layout.
 └── mcp.json      canonical MCP server config
 ```
 
-`ags init` creates starter directories and sample files. Teams can commit the
+`ags migrate` creates this layout by importing existing native agent files.
+`ags init` creates starter directories and sample files only for new
+canonical-first repositories with no native files to import. Teams can commit the
 canonical files and usually ignore generated tool-native outputs.
 
 ## Agents
