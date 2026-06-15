@@ -1,7 +1,8 @@
 # CLI Usage Guide
 
 `ags` keeps a canonical `.agents/` directory synchronized with the native
-formats used by coding-agent tools.
+formats used by coding-agent tools. For the default coding-agent path mapping,
+see [Canonical `.agents/` Files](canonical-files.md#default-integration-map).
 
 ## Command Surface Review
 
@@ -130,11 +131,12 @@ ags migrate --keep-native
 ags migrate --no-setup
 ```
 
-`migrate` creates `.agent-switch.yaml` if needed. For symlink/copy mappings it
+`migrate` creates `.agent-switch.yaml` if needed. For managed-link mappings it
 copies native files such as `CLAUDE.md`, `.claude/commands`, `.agent/rules`, or
 `.opencode/commands` into their canonical targets, then backs up the native
-paths as `.bak` so `setup` can create managed links. For generated formats it
-imports `.github`, `.codex`, and `.opencode` generated files into `.agents/`.
+paths as `.bak` so `setup` can create managed links, Windows directory
+junctions, or file-copy fallbacks as needed. For generated formats it imports
+`.github`, `.codex`, and `.opencode` generated files into `.agents/`.
 For MCP configs it imports known native MCP shapes into `.agents/mcp.json`.
 Conflicting canonical files are skipped unless `--force` is used. Use
 `--keep-native` when you want to preserve native files instead of backing them
@@ -142,7 +144,8 @@ up.
 
 ## Preparing Native Tool Files
 
-Create or repair symlinks/copy fallbacks, then run a normal sync:
+Create or repair managed links, Windows junctions, or file-copy fallbacks, then
+run a normal sync:
 
 ```bash
 ags setup
@@ -155,7 +158,8 @@ ags setup --tool codex
 ags setup --tool claude,copilot
 ```
 
-Remove managed links/copy fallbacks for tools that are no longer selected:
+Remove managed links or file-copy fallbacks for tools that are no longer
+selected:
 
 ```bash
 ags setup --tool codex --prune
@@ -168,7 +172,7 @@ ags setup --check
 ags setup --tool codex --prune --check
 ```
 
-Only repair links/copies and skip generated-file sync:
+Only repair links/fallbacks and skip generated-file sync:
 
 ```bash
 ags setup --no-sync

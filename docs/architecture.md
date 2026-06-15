@@ -166,7 +166,8 @@ Tool filter 會套用在 `symlinks`、`generate`、`merge`：
 
 ## Setup Architecture
 
-`setup::run` 負責建立工具原生位置需要的 symlink 或 fallback copy。
+`setup::run` 負責建立工具原生位置需要的 symlink、Windows directory
+junction，或必要時的 file-copy fallback。
 
 ```text
 setup::run
@@ -216,7 +217,7 @@ setup::run
                                        v     v
               +--------------------------+  +-----------------------------+
               | skip unmanaged real file |  | create symlink or fallback |
-              | / dir; check => Drift    |  | copy / junction           |
+              | / dir; check => Drift    |  | file copy / junction      |
               +--------------------------+  +-----------------------------+
 ```
 
@@ -354,7 +355,7 @@ Manifest 的用途：
 - 判斷 generated file 是否被 tool-side 修改。
 - 判斷 canonical source 是否也同時改動，並在 event 中標記 conflict。
 - 移除 stale generated outputs。
-- 追蹤 Windows/copy fallback 的 managed copy hash。
+- 追蹤 Windows file-copy fallback 的 managed copy hash。
 
 ## Format Adapters
 
