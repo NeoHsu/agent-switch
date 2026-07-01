@@ -115,6 +115,33 @@ fn copilot_agent_round_trips_namespace() {
 }
 
 #[test]
+fn copilot_agent_import_infers_dotted_name_from_native_filename() {
+    let native = "---\ndescription: Plans specs.\n---\nPlan the work.\n";
+
+    let imported = Format::CopilotAgent
+        .import(
+            Path::new(".github/agents/speckit.git.commit.agent.md"),
+            native,
+        )
+        .unwrap();
+
+    assert!(imported.contains("name: speckit.git.commit"));
+    assert!(imported.contains("description: Plans specs."));
+}
+
+#[test]
+fn copilot_prompt_import_infers_dotted_name_from_native_filename() {
+    let native = "---\ndescription: Creates tasks.\n---\nCreate tasks.\n";
+
+    let imported = Format::CopilotPrompt
+        .import(Path::new(".github/prompts/speckit.tasks.prompt.md"), native)
+        .unwrap();
+
+    assert!(imported.contains("name: speckit.tasks"));
+    assert!(imported.contains("description: Creates tasks."));
+}
+
+#[test]
 fn copilot_agent_requires_name_and_description() {
     let missing_name = "---\ndescription: Fixes issues.\n---\nFix it.\n";
     let missing_description = "---\nname: fixer\n---\nFix it.\n";

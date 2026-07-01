@@ -14,10 +14,10 @@ use clap::{Args, Parser, Subcommand};
 #[command(
     name = "ags",
     version,
-    about = "Synchronize canonical .agents files with coding agent native formats."
+    about = "Synchronize canonical .agent files with coding agent native formats."
 )]
 struct Cli {
-    /// Repository root. Defaults to the nearest directory containing .agent-switch.yaml, .agents, or .git.
+    /// Repository root. Defaults to the nearest directory containing .agent-switch.yaml, .agent, or .git.
     #[arg(long, global = true, env = "AGENT_SWITCH_ROOT")]
     root: Option<PathBuf>,
     /// Path to .agent-switch.yaml. Used by migrate, setup, sync, doctor, and mappings validate.
@@ -43,7 +43,7 @@ struct Cli {
 enum Commands {
     /// Create starter config, canonical directories, sample files, and .gitignore entries.
     Init(InitArgs),
-    /// Import existing native coding-agent files into canonical .agents files.
+    /// Import existing native coding-agent files into canonical .agent files.
     Migrate(MigrateArgs),
     /// Create or repair native tool links/copies, then run sync unless --no-sync is set.
     Setup(SetupArgs),
@@ -104,10 +104,10 @@ struct SyncArgs {
     /// Report generated-file drift without writing files. Exits with the drift code on changes.
     #[arg(long)]
     check: bool,
-    /// Import native generated files back into canonical .agents files only.
+    /// Import native generated files back into canonical .agent files only.
     #[arg(long, conflicts_with = "export_only")]
     import_only: bool,
-    /// Export canonical .agents files to native tool formats only.
+    /// Export canonical .agent files to native tool formats only.
     #[arg(long, conflicts_with = "import_only")]
     export_only: bool,
     /// Ignore the existing sync manifest and rebuild it from current files.
@@ -289,7 +289,7 @@ fn run(cli: Cli) -> Result<CommandOutput> {
                 &cfg,
                 tools_ref,
             );
-            add_sync_diagnostics(&mut out, verbosity, &args);
+            add_sync_diagnostics(&mut out, verbosity, &args, &cfg);
             out
         }
         Commands::Doctor(args) => {
@@ -448,13 +448,18 @@ fn add_config_selection_diagnostics(
     }
 }
 
-fn add_sync_diagnostics(out: &mut CommandOutput, verbosity: Verbosity, args: &SyncArgs) {
+fn add_sync_diagnostics(
+    out: &mut CommandOutput,
+    verbosity: Verbosity,
+    args: &SyncArgs,
+    cfg: &config::Config,
+) {
     if !verbosity.verbose {
         return;
     }
     out.diagnostic(format!(
         "verbose: sync stages: {}",
-        sync_stage_labels(args).join(", ")
+        sync_stage_labels(args, cfg).join(", ")
     ));
     out.diagnostic(format!("verbose: reset manifest: {}", args.reset_manifest));
     if verbosity.debug {
@@ -499,13 +504,21 @@ fn add_setup_diagnostics(out: &mut CommandOutput, verbosity: Verbosity, args: &S
     }
 }
 
-fn sync_stage_labels(args: &SyncArgs) -> Vec<&'static str> {
+fn sync_stage_labels(args: &SyncArgs, cfg: &config::Config) -> Vec<&'static str> {
     if args.import_only {
         vec!["import"]
     } else if args.export_only {
         vec!["export", "remove-stale", "sync-links", "merge"]
     } else {
-        vec!["import", "export", "remove-stale", "sync-links", "merge"]
+        match cfg.sync_mode {
+            config::SyncMode::Full => {
+                vec!["import", "export", "remove-stale", "sync-links", "merge"]
+            }
+            config::SyncMode::CanonicalOnly | config::SyncMode::ExportOnly => {
+                vec!["export", "remove-stale", "sync-links", "merge"]
+            }
+            config::SyncMode::ImportOnly => vec!["import"],
+        }
     }
 }
 

@@ -9,7 +9,7 @@ use anyhow::Result;
 
 use crate::{
     CommandOutput, ExitCode,
-    config::{self, Config},
+    config::{self, Config, ManagedLink},
     fs::{abs, io_error, is_fake_symlink, relative_link, remove_file_or_empty_dir, repo_path},
     manifest, sync,
     tool::Tool,
@@ -38,87 +38,21 @@ pub fn run(
         if !config::symlink_selected(link, spec, tools) {
             continue;
         }
-        let link_rel = Path::new(link);
-        let target_rel_cfg = spec.target();
-        let target_cfg = spec.target_config();
-        let link_abs = abs(root, link_rel);
-        let target_abs = abs(root, target_rel_cfg);
-        let rel_target = relative_link(&link_abs, &target_abs);
-        let rel_target_display = repo_path(&rel_target);
+        drift |= setup_link(
+            root,
+            &ManagedLink {
+                link: PathBuf::from(link),
+                target: spec.target().to_path_buf(),
+                target_config: spec.target_config(),
+            },
+            opts,
+            &mut out,
+        )?;
+    }
 
-        if is_correct_link(&link_abs, &target_abs)? {
-            out.push(format!(
-                "ok       {} -> {}",
-                repo_path(link_rel),
-                rel_target_display
-            ));
-            continue;
-        }
-
-        if is_fake_symlink(&link_abs, &rel_target, &target_cfg) {
-            drift = true;
-            if opts.check {
-                out.push(format!("repaired {}", repo_path(link_rel)));
-                continue;
-            }
-            remove_file_or_empty_dir(&link_abs)?;
-            let is_symlink = create_link_or_fallback(&link_abs, &target_abs, &rel_target)?;
-            out.push(link_message(
-                "repaired",
-                link_rel,
-                &rel_target_display,
-                is_symlink,
-            ));
-            continue;
-        }
-
-        if link_abs.exists() || link_abs.is_symlink() {
-            if opts.check {
-                drift = true;
-            }
-            if opts.force && link_abs.is_symlink() {
-                drift = true;
-                if !opts.check {
-                    remove_file_or_empty_dir(&link_abs)?;
-                    let is_symlink = create_link_or_fallback(&link_abs, &target_abs, &rel_target)?;
-                    out.push(link_message(
-                        "repaired",
-                        link_rel,
-                        &rel_target_display,
-                        is_symlink,
-                    ));
-                } else {
-                    out.push(format!(
-                        "repaired {} -> {}",
-                        repo_path(link_rel),
-                        rel_target_display
-                    ));
-                }
-            } else {
-                out.push(format!(
-                    "skipped  {}: existing real file or directory; merge it into {} and remove it before retrying",
-                    repo_path(link_rel),
-                    repo_path(target_rel_cfg)
-                ));
-            }
-            continue;
-        }
-
-        drift = true;
-        if !opts.check {
-            let is_symlink = create_link_or_fallback(&link_abs, &target_abs, &rel_target)?;
-            out.push(link_message(
-                "created ",
-                link_rel,
-                &rel_target_display,
-                is_symlink,
-            ));
-        } else {
-            out.push(format!(
-                "created  {} -> {}",
-                repo_path(link_rel),
-                rel_target_display
-            ));
+    if tool_selected(Tool::Claude, tools) {
+        for link in config::claude_instruction_links(root)? {
+            drift |= setup_link(root, &link, opts, &mut out)?;
         }
     }
 
@@ -133,6 +67,90 @@ pub fn run(
         out.exit = sync_out.exit;
     }
     Ok(out)
+}
+
+fn setup_link(
+    root: &Path,
+    managed: &ManagedLink,
+    opts: SetupOptions,
+    out: &mut CommandOutput,
+) -> Result<bool> {
+    let link_rel = managed.link.as_path();
+    let target_rel_cfg = managed.target.as_path();
+    let link_abs = abs(root, link_rel);
+    let target_abs = abs(root, target_rel_cfg);
+    let rel_target = relative_link(&link_abs, &target_abs);
+    let rel_target_display = repo_path(&rel_target);
+
+    if is_correct_link(&link_abs, &target_abs)? {
+        out.push(format!(
+            "ok       {} -> {}",
+            repo_path(link_rel),
+            rel_target_display
+        ));
+        return Ok(false);
+    }
+
+    if is_fake_symlink(&link_abs, &rel_target, &managed.target_config) {
+        if opts.check {
+            out.push(format!("repaired {}", repo_path(link_rel)));
+            return Ok(true);
+        }
+        remove_file_or_empty_dir(&link_abs)?;
+        let is_symlink = create_link_or_fallback(&link_abs, &target_abs, &rel_target)?;
+        out.push(link_message(
+            "repaired",
+            link_rel,
+            &rel_target_display,
+            is_symlink,
+        ));
+        return Ok(true);
+    }
+
+    if link_abs.exists() || link_abs.is_symlink() {
+        if opts.force && link_abs.is_symlink() {
+            if !opts.check {
+                remove_file_or_empty_dir(&link_abs)?;
+                let is_symlink = create_link_or_fallback(&link_abs, &target_abs, &rel_target)?;
+                out.push(link_message(
+                    "repaired",
+                    link_rel,
+                    &rel_target_display,
+                    is_symlink,
+                ));
+            } else {
+                out.push(format!(
+                    "repaired {} -> {}",
+                    repo_path(link_rel),
+                    rel_target_display
+                ));
+            }
+            return Ok(true);
+        }
+        out.push(format!(
+            "skipped  {}: existing real file or directory; merge it into {} and remove it before retrying",
+            repo_path(link_rel),
+            repo_path(target_rel_cfg)
+        ));
+        return Ok(opts.check);
+    }
+
+    if !opts.check {
+        let is_symlink = create_link_or_fallback(&link_abs, &target_abs, &rel_target)?;
+        out.push(link_message(
+            "created ",
+            link_rel,
+            &rel_target_display,
+            is_symlink,
+        ));
+    } else {
+        out.push(format!(
+            "created  {} -> {}",
+            repo_path(link_rel),
+            rel_target_display
+        ));
+    }
+    Ok(true)
 }
 
 fn prune_unselected(
@@ -154,36 +172,27 @@ fn prune_unselected(
         if config::symlink_selected(link, spec, Some(tools)) {
             continue;
         }
-        let link_rel = Path::new(link);
-        let target_rel = spec.target();
-        let target_cfg = spec.target_config();
-        let link_abs = abs(root, link_rel);
-        let target_abs = abs(root, target_rel);
-        let rel_target = relative_link(&link_abs, &target_abs);
-        let link_key = repo_path(link_rel);
-        let had_manifest_link = sync_manifest.links.contains_key(&link_key);
+        let (did_change, did_manifest_change) = prune_link(
+            root,
+            &mut sync_manifest,
+            &ManagedLink {
+                link: PathBuf::from(link),
+                target: spec.target().to_path_buf(),
+                target_config: spec.target_config(),
+            },
+            check,
+            out,
+        )?;
+        changed |= did_change;
+        manifest_changed |= did_manifest_change;
+    }
 
-        let managed = is_correct_link(&link_abs, &target_abs)?
-            || is_fake_symlink(&link_abs, &rel_target, &target_cfg)
-            || (had_manifest_link && link_abs.is_file());
-        if managed {
-            changed = true;
-            if !check {
-                remove_file_or_empty_dir(&link_abs)?;
-            }
-            out.push(format!("removed: {}", link_key));
-        } else if had_manifest_link && !link_abs.exists() {
-            changed = true;
-            out.push(format!("removed: {}", link_key));
-        } else if link_abs.exists() || link_abs.is_symlink() {
-            out.push(format!(
-                "skipped  {}: existing real file or directory; remove it manually if it is no longer needed",
-                link_key
-            ));
-        }
-
-        if sync_manifest.links.remove(&link_key).is_some() {
-            manifest_changed = true;
+    if !tool_selected(Tool::Claude, Some(tools)) {
+        for link in config::claude_instruction_links(root)? {
+            let (did_change, did_manifest_change) =
+                prune_link(root, &mut sync_manifest, &link, check, out)?;
+            changed |= did_change;
+            manifest_changed |= did_manifest_change;
         }
     }
 
@@ -192,6 +201,49 @@ fn prune_unselected(
     }
 
     Ok(changed || manifest_changed)
+}
+
+fn prune_link(
+    root: &Path,
+    sync_manifest: &mut manifest::Manifest,
+    managed: &ManagedLink,
+    check: bool,
+    out: &mut CommandOutput,
+) -> Result<(bool, bool)> {
+    let link_rel = managed.link.as_path();
+    let target_rel = managed.target.as_path();
+    let link_abs = abs(root, link_rel);
+    let target_abs = abs(root, target_rel);
+    let rel_target = relative_link(&link_abs, &target_abs);
+    let link_key = repo_path(link_rel);
+    let had_manifest_link = sync_manifest.links.contains_key(&link_key);
+
+    let is_managed = is_correct_link(&link_abs, &target_abs)?
+        || is_fake_symlink(&link_abs, &rel_target, &managed.target_config)
+        || (had_manifest_link && link_abs.is_file());
+    let mut changed = false;
+    if is_managed {
+        changed = true;
+        if !check {
+            remove_file_or_empty_dir(&link_abs)?;
+        }
+        out.push(format!("removed: {}", link_key));
+    } else if had_manifest_link && !link_abs.exists() {
+        changed = true;
+        out.push(format!("removed: {}", link_key));
+    } else if link_abs.exists() || link_abs.is_symlink() {
+        out.push(format!(
+            "skipped  {}: existing real file or directory; remove it manually if it is no longer needed",
+            link_key
+        ));
+    }
+
+    let manifest_changed = sync_manifest.links.remove(&link_key).is_some();
+    Ok((changed, manifest_changed))
+}
+
+fn tool_selected(tool: Tool, tools: Option<&[Tool]>) -> bool {
+    tools.is_none_or(|tools| tools.contains(&tool))
 }
 
 fn is_correct_link(link: &Path, target: &Path) -> Result<bool> {

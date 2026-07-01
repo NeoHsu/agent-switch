@@ -25,8 +25,8 @@ impl Format {
 
     pub fn import(self, generated_path: &Path, generated: &str) -> Result<String> {
         let out = match self {
-            Format::CopilotAgent => copilot::import_agent(generated),
-            Format::CopilotPrompt => copilot::import_prompt(generated),
+            Format::CopilotAgent => copilot::import_agent(generated_path, generated),
+            Format::CopilotPrompt => copilot::import_prompt(generated_path, generated),
             Format::CopilotInstructions => copilot::import_instructions(generated),
             Format::OpencodeAgent => opencode::import_agent(generated_path, generated),
             Format::CodexAgent => codex::import_agent(generated),

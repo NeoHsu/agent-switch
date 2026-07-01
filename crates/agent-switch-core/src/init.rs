@@ -10,31 +10,11 @@ use anyhow::Result;
 
 use crate::{
     CommandOutput,
-    config::{self, CONFIG_FILE, Config, write_config},
+    config::{self, CONFIG_FILE, Config, GeneratedTracking, write_config},
     fs::{io_error, write_if_changed},
     mcp,
     tool::Tool,
 };
-
-const GITIGNORE_BLOCK: &str = r#"# >>> agent-switch >>>
-# Agent Switch runtime state
-.agents/.sync-manifest.json
-
-# Tool-specific links/copies and generated adapters
-.claude/
-.copilot/
-.pi/
-.agent/
-.codex/
-.opencode/
-.github/agents/
-.github/prompts/
-.github/instructions/
-
-# Agent Switch-managed merge target; remove this line if your team wants to commit OpenCode config
-opencode.json
-# <<< agent-switch <<<
-"#;
 
 pub fn run(root: &Path, tools: Option<&str>, force: bool) -> Result<CommandOutput> {
     let selected_tools = tools.map(config::parse_tools).transpose()?;
@@ -64,21 +44,27 @@ pub fn run(root: &Path, tools: Option<&str>, force: bool) -> Result<CommandOutpu
         &agents_dir.join("mcp.json"),
         mcp::EMPTY_MCP,
         force,
-        ".agents/mcp.json",
+        &format!("{}/mcp.json", crate::fs::repo_path(&cfg.agents_dir)),
         &mut out,
     )?;
     write_sample(
         &agents_dir.join("rules/code-style.md"),
         "---\npaths:\n- \"**/*.rs\"\n---\nUse clear, direct Rust code.\n",
         force,
-        ".agents/rules/code-style.md",
+        &format!(
+            "{}/rules/code-style.md",
+            crate::fs::repo_path(&cfg.agents_dir)
+        ),
         &mut out,
     )?;
     write_sample(
         &agents_dir.join("skills/example-skill/SKILL.md"),
         "# Example Skill\n\nUse this as a placeholder skill.\n",
         force,
-        ".agents/skills/example-skill/SKILL.md",
+        &format!(
+            "{}/skills/example-skill/SKILL.md",
+            crate::fs::repo_path(&cfg.agents_dir)
+        ),
         &mut out,
     )?;
 
@@ -87,7 +73,7 @@ pub fn run(root: &Path, tools: Option<&str>, force: bool) -> Result<CommandOutpu
     } else {
         out.push(format!("skipped  {CONFIG_FILE}: already exists"));
     }
-    update_gitignore(root, &mut out)?;
+    update_gitignore_for_config(root, &cfg, &mut out)?;
     if let Some(tools) = tools {
         out.push(format!("ok       initialized tools: {tools}"));
     }
@@ -134,6 +120,10 @@ fn filtered_default_config(tools: Option<&[Tool]>) -> Config {
 }
 
 pub fn update_gitignore(root: &Path, out: &mut CommandOutput) -> Result<()> {
+    update_gitignore_for_config(root, &Config::default(), out)
+}
+
+fn update_gitignore_for_config(root: &Path, cfg: &Config, out: &mut CommandOutput) -> Result<()> {
     let path = root.join(".gitignore");
     let current = match fs::read_to_string(&path) {
         Ok(current) => current,
@@ -148,11 +138,46 @@ pub fn update_gitignore(root: &Path, out: &mut CommandOutput) -> Result<()> {
     if !next.is_empty() {
         next.push_str("\n\n");
     }
-    next.push_str(GITIGNORE_BLOCK);
+    next.push_str(&gitignore_block(cfg));
     next.push('\n');
     write_if_changed(&path, &next)?;
     out.push("updated  .gitignore");
     Ok(())
+}
+
+fn gitignore_block(cfg: &Config) -> String {
+    let mut lines = vec![
+        "# >>> agent-switch >>>".to_string(),
+        "# Agent Switch runtime state".to_string(),
+        crate::fs::repo_path(&cfg.manifest),
+        String::new(),
+        "# Tool-specific links/copies and generated adapters".to_string(),
+        ".claude/".to_string(),
+        ".copilot/".to_string(),
+        ".pi/".to_string(),
+        ".codex/".to_string(),
+        ".opencode/".to_string(),
+    ];
+
+    for (id, spec) in &cfg.generate {
+        if cfg.generated_tracking.get(id) == Some(&GeneratedTracking::Tracked) {
+            continue;
+        }
+        lines.push(crate::fs::repo_path(&spec.to) + "/");
+    }
+
+    if cfg.generated_tracking.get("opencode-config") != Some(&GeneratedTracking::Tracked) {
+        lines.push(String::new());
+        lines.push(
+            "# Agent Switch-managed merge target; remove this line if your team wants to commit OpenCode config"
+                .to_string(),
+        );
+        lines.push("opencode.json".to_string());
+    }
+
+    lines.push("# <<< agent-switch <<<".to_string());
+    lines.push(String::new());
+    lines.join("\n")
 }
 
 fn rel(root: &Path, path: &Path) -> String {

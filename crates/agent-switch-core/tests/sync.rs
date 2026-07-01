@@ -4,7 +4,7 @@ use serde_json::json;
 
 use agent_switch_core::{
     Error, ExitCode,
-    config::{self, Config},
+    config::{self, Config, SyncMode},
     manifest,
     sync::{self, SyncOptions},
     tool::Tool,
@@ -21,7 +21,7 @@ fn write(path: &Path, content: &str) {
 fn fixture(root: &Path) -> Config {
     config::write_default_config(&root.join(".agent-switch.yaml"), false).unwrap();
     write(
-        &root.join(".agents/agents/reviewer.md"),
+        &root.join(".agent/agents/reviewer.md"),
         r#"---
 name: reviewer
 description: Reviews code changes.
@@ -38,7 +38,7 @@ Review the diff.
 "#,
     );
     write(
-        &root.join(".agents/commands/fix.md"),
+        &root.join(".agent/commands/fix.md"),
         r#"---
 name: fix
 description: Fix an issue.
@@ -49,7 +49,7 @@ Fix the issue.
 "#,
     );
     write(
-        &root.join(".agents/rules/testing/unit.md"),
+        &root.join(".agent/rules/testing/unit.md"),
         r#"---
 description: Unit testing rules.
 paths:
@@ -60,7 +60,7 @@ Write focused tests.
 "#,
     );
     write(
-        &root.join(".agents/mcp.json"),
+        &root.join(".agent/mcp.json"),
         r#"{
   "mcpServers": {
     "context7": {
@@ -72,7 +72,9 @@ Write focused tests.
 }
 "#,
     );
-    config::load_config(root, None).unwrap().0
+    let mut cfg = config::load_config(root, None).unwrap().0;
+    cfg.sync_mode = SyncMode::Full;
+    cfg
 }
 
 #[test]
@@ -98,7 +100,7 @@ fn full_sync_generates_outputs_and_check_passes() {
     assert!(root.join("opencode.json").exists());
     assert!(root.join(".codex/config.toml").exists());
     assert!(root.join(".copilot/mcp-config.json").exists());
-    assert!(root.join(".agents/.sync-manifest.json").exists());
+    assert!(root.join(".agent/.sync-manifest.json").exists());
 
     let second = sync::run(root, &cfg, None, SyncOptions::default()).unwrap();
     assert_eq!(second.lines, vec!["synced, no changes."]);
@@ -121,12 +123,12 @@ fn sync_reports_manifest_recovery_hint() {
     let temp = tempdir().unwrap();
     let root = temp.path();
     let cfg = fixture(root);
-    write(&root.join(".agents/.sync-manifest.json"), "{not json\n");
+    write(&root.join(".agent/.sync-manifest.json"), "{not json\n");
 
     let err = sync::run(root, &cfg, None, SyncOptions::default()).unwrap_err();
     let message = format!("{err:#}");
 
-    assert!(message.contains("failed to read manifest .agents/.sync-manifest.json"));
+    assert!(message.contains("failed to read manifest .agent/.sync-manifest.json"));
     assert!(message.contains("Run `ags sync --reset-manifest` to rebuild it."));
 }
 
@@ -135,7 +137,7 @@ fn sync_reset_manifest_rebuilds_corrupt_manifest() {
     let temp = tempdir().unwrap();
     let root = temp.path();
     let cfg = fixture(root);
-    let manifest_path = root.join(".agents/.sync-manifest.json");
+    let manifest_path = root.join(".agent/.sync-manifest.json");
     write(&manifest_path, "{not json\n");
 
     let out = sync::run(
@@ -150,7 +152,7 @@ fn sync_reset_manifest_rebuilds_corrupt_manifest() {
     .unwrap();
 
     assert!(out.lines.iter().any(|line| {
-        line == "warning: reset manifest: rebuilding .agents/.sync-manifest.json from current files"
+        line == "warning: reset manifest: rebuilding .agent/.sync-manifest.json from current files"
     }));
     let rebuilt = manifest::load(&manifest_path).unwrap();
     assert!(!rebuilt.generated.is_empty());
@@ -161,7 +163,7 @@ fn sync_reset_manifest_check_reports_drift_without_writing() {
     let temp = tempdir().unwrap();
     let root = temp.path();
     let cfg = fixture(root);
-    let manifest_path = root.join(".agents/.sync-manifest.json");
+    let manifest_path = root.join(".agent/.sync-manifest.json");
     write(&manifest_path, "{not json\n");
 
     let out = sync::run(
@@ -383,7 +385,7 @@ Review from generated.
 "#,
     );
     write(
-        &root.join(".agents/agents/reviewer.md"),
+        &root.join(".agent/agents/reviewer.md"),
         r#"---
 name: reviewer
 description: Canonical side description.
@@ -400,9 +402,9 @@ Canonical body changed.
 
     let out = sync::run(root, &cfg, Some(&[Tool::Copilot]), SyncOptions::default()).unwrap();
     assert!(out.lines.iter().any(|line| {
-        line == "imported(conflict, tool-side wins): .github/agents/reviewer.agent.md -> .agents/agents/reviewer.md"
+        line == "imported(conflict, tool-side wins): .github/agents/reviewer.agent.md -> .agent/agents/reviewer.md"
     }));
-    let canonical = fs::read_to_string(root.join(".agents/agents/reviewer.md")).unwrap();
+    let canonical = fs::read_to_string(root.join(".agent/agents/reviewer.md")).unwrap();
     assert!(canonical.contains("Tool side description."));
     assert!(canonical.contains("Review from generated."));
     assert!(canonical.contains("opencode:"));
@@ -442,7 +444,7 @@ fn sync_generates_outputs_with_uppercase_markdown_sources() {
     let cfg = fixture(root);
 
     write(
-        &root.join(".agents/agents/UPPER.MD"),
+        &root.join(".agent/agents/UPPER.MD"),
         r#"---
 name: uppercase
 description: Source with uppercase extension.
@@ -468,7 +470,7 @@ fn stale_generated_file_is_removed_when_source_is_deleted() {
     let cfg = fixture(root);
 
     sync::run(root, &cfg, Some(&[Tool::Codex]), SyncOptions::default()).unwrap();
-    fs::remove_file(root.join(".agents/agents/reviewer.md")).unwrap();
+    fs::remove_file(root.join(".agent/agents/reviewer.md")).unwrap();
 
     let out = sync::run(root, &cfg, Some(&[Tool::Codex]), SyncOptions::default()).unwrap();
     assert!(

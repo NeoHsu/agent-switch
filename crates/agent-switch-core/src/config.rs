@@ -9,6 +9,7 @@ use std::{
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use walkdir::{DirEntry, WalkDir};
 
 use crate::{
     Error,
@@ -26,11 +27,44 @@ pub struct Config {
     #[serde(default = "default_manifest")]
     pub manifest: PathBuf,
     #[serde(default)]
+    pub sync_mode: SyncMode,
+    #[serde(default)]
+    pub generated_tracking: BTreeMap<String, GeneratedTracking>,
+    #[serde(default)]
     pub symlinks: BTreeMap<String, SymlinkSpec>,
     #[serde(default)]
     pub generate: BTreeMap<String, GenerateSpec>,
     #[serde(default)]
     pub merge: BTreeMap<String, MergeSpec>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ManagedLink {
+    pub link: PathBuf,
+    pub target: PathBuf,
+    pub target_config: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SyncMode {
+    Full,
+    CanonicalOnly,
+    ExportOnly,
+    ImportOnly,
+}
+
+impl Default for SyncMode {
+    fn default() -> Self {
+        Self::CanonicalOnly
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum GeneratedTracking {
+    Tracked,
+    Ignored,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -115,31 +149,28 @@ fn explicit_tools(tool: Option<Tool>, tools: Option<&[Tool]>) -> Option<Vec<Tool
 }
 
 fn default_agents_dir() -> PathBuf {
-    PathBuf::from(".agents")
+    PathBuf::from(".agent")
 }
 
 fn default_manifest() -> PathBuf {
-    PathBuf::from(".agents/.sync-manifest.json")
+    PathBuf::from(".agent/.sync-manifest.json")
 }
 
 const DEFAULT_SYMLINKS: &[(&str, &str)] = &[
-    (".claude/skills", ".agents/skills"),
-    (".claude/agents", ".agents/agents"),
-    (".claude/commands", ".agents/commands"),
-    (".claude/rules", ".agents/rules"),
-    (".opencode/commands", ".agents/commands"),
-    (".agent/rules", ".agents/rules"),
-    (".agent/workflows", ".agents/commands"),
-    (".agent/skills", ".agents/skills"),
-    (".mcp.json", ".agents/mcp.json"),
-    (".pi/mcp.json", ".agents/mcp.json"),
+    (".claude/skills", "skills"),
+    (".claude/agents", "agents"),
+    (".claude/commands", "commands"),
+    (".claude/rules", "rules"),
+    (".opencode/commands", "commands"),
+    (".mcp.json", "mcp.json"),
+    (".pi/mcp.json", "mcp.json"),
     ("CLAUDE.md", "AGENTS.md"),
 ];
 
 const DEFAULT_GENERATE: &[(&str, &str, &str, Format, &str, bool)] = &[
     (
         "copilot-agents",
-        ".agents/agents",
+        "agents",
         ".github/agents",
         Format::CopilotAgent,
         ".agent.md",
@@ -147,7 +178,7 @@ const DEFAULT_GENERATE: &[(&str, &str, &str, Format, &str, bool)] = &[
     ),
     (
         "copilot-prompts",
-        ".agents/commands",
+        "commands",
         ".github/prompts",
         Format::CopilotPrompt,
         ".prompt.md",
@@ -155,7 +186,7 @@ const DEFAULT_GENERATE: &[(&str, &str, &str, Format, &str, bool)] = &[
     ),
     (
         "copilot-instructions",
-        ".agents/rules",
+        "rules",
         ".github/instructions",
         Format::CopilotInstructions,
         ".instructions.md",
@@ -163,7 +194,7 @@ const DEFAULT_GENERATE: &[(&str, &str, &str, Format, &str, bool)] = &[
     ),
     (
         "opencode-agents",
-        ".agents/agents",
+        "agents",
         ".opencode/agents",
         Format::OpencodeAgent,
         ".md",
@@ -171,7 +202,7 @@ const DEFAULT_GENERATE: &[(&str, &str, &str, Format, &str, bool)] = &[
     ),
     (
         "codex-agents",
-        ".agents/agents",
+        "agents",
         ".codex/agents",
         Format::CodexAgent,
         ".toml",
@@ -191,9 +222,22 @@ const DEFAULT_MERGE: &[(&str, &str, MergeFormat)] = &[
 
 impl Default for Config {
     fn default() -> Self {
+        Self::for_agents_dir(default_agents_dir())
+    }
+}
+
+impl Config {
+    pub fn for_agents_dir(agents_dir: PathBuf) -> Self {
         let symlinks = DEFAULT_SYMLINKS
             .iter()
-            .map(|(link, target)| (link.to_string(), SymlinkSpec::Target((*target).into())))
+            .map(|(link, target)| {
+                let target = if *target == "AGENTS.md" {
+                    PathBuf::from(target)
+                } else {
+                    agents_dir.join(target)
+                };
+                (link.to_string(), SymlinkSpec::Target(target))
+            })
             .collect();
         let generate = DEFAULT_GENERATE
             .iter()
@@ -201,7 +245,7 @@ impl Default for Config {
                 (
                     id.to_string(),
                     GenerateSpec {
-                        from: from.into(),
+                        from: agents_dir.join(from),
                         to: to.into(),
                         format,
                         suffix: Some(suffix.to_string()),
@@ -226,11 +270,29 @@ impl Default for Config {
                 )
             })
             .collect();
+        let generated_tracking = [
+            ("copilot-agents", GeneratedTracking::Tracked),
+            ("copilot-prompts", GeneratedTracking::Tracked),
+            ("copilot-instructions", GeneratedTracking::Tracked),
+            ("claude", GeneratedTracking::Ignored),
+            ("codex-agents", GeneratedTracking::Ignored),
+            ("opencode-agents", GeneratedTracking::Ignored),
+            ("opencode-config", GeneratedTracking::Ignored),
+            ("copilot-mcp-config", GeneratedTracking::Ignored),
+            ("codex-config", GeneratedTracking::Ignored),
+        ]
+        .into_iter()
+        .map(|(id, tracking)| (id.to_string(), tracking))
+        .collect();
+
+        let manifest = agents_dir.join(".sync-manifest.json");
 
         Self {
             version: 1,
-            agents_dir: default_agents_dir(),
-            manifest: default_manifest(),
+            agents_dir,
+            manifest,
+            sync_mode: SyncMode::CanonicalOnly,
+            generated_tracking,
             symlinks,
             generate,
             merge,
@@ -285,7 +347,7 @@ pub fn find_root(explicit: Option<&Path>) -> Result<PathBuf> {
     let mut dir = env::current_dir()?;
     loop {
         if dir.join(CONFIG_FILE).exists()
-            || dir.join(".agents").exists()
+            || dir.join(".agent").exists()
             || dir.join(".git").exists()
         {
             return Ok(dir);
@@ -334,4 +396,66 @@ fn selected(mapping_tools: &[Tool], filter: Option<&[Tool]>) -> bool {
         return true;
     };
     mapping_tools.iter().any(|tool| filter.contains(tool))
+}
+
+pub fn claude_instruction_links(root: &Path) -> Result<Vec<ManagedLink>> {
+    let mut links = Vec::new();
+    for entry in WalkDir::new(root)
+        .sort_by_file_name()
+        .into_iter()
+        .filter_entry(|entry| should_visit_instruction_entry(root, entry))
+    {
+        let entry = entry?;
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        if entry.file_name() != "AGENTS.md" {
+            continue;
+        }
+        let rel = entry.path().strip_prefix(root)?;
+        if rel.components().count() <= 1 {
+            continue;
+        }
+        let mut link = rel.to_path_buf();
+        link.set_file_name("CLAUDE.md");
+        links.push(ManagedLink {
+            link,
+            target: rel.to_path_buf(),
+            target_config: rel.to_string_lossy().replace('\\', "/"),
+        });
+    }
+    Ok(links)
+}
+
+fn should_visit_instruction_entry(root: &Path, entry: &DirEntry) -> bool {
+    if entry.depth() == 0 {
+        return true;
+    }
+    if !entry.file_type().is_dir() {
+        return true;
+    }
+    let Ok(rel) = entry.path().strip_prefix(root) else {
+        return false;
+    };
+    let Some(name) = rel
+        .components()
+        .next_back()
+        .and_then(|c| c.as_os_str().to_str())
+    else {
+        return false;
+    };
+    !matches!(
+        name,
+        ".git"
+            | ".agent"
+            | ".agents"
+            | ".claude"
+            | ".codex"
+            | ".copilot"
+            | ".github"
+            | ".opencode"
+            | ".pi"
+            | "node_modules"
+            | "target"
+    )
 }

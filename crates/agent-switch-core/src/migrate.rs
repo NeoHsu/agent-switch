@@ -53,6 +53,9 @@ pub fn run(
 
     drift |= ensure_canonical_dirs(root, &cfg, opts.check, &mut out)?;
 
+    let generated_outcome = import_generated_sources(root, &cfg, tools, opts, &mut out)?;
+    drift |= generated_outcome.changed || generated_outcome.skipped;
+    skipped |= generated_outcome.skipped;
     let mut native_paths_to_backup = BTreeSet::new();
     let symlink_outcome = import_symlink_sources(
         root,
@@ -64,9 +67,6 @@ pub fn run(
     )?;
     drift |= symlink_outcome.changed || symlink_outcome.skipped;
     skipped |= symlink_outcome.skipped;
-    let generated_outcome = import_generated_sources(root, &cfg, tools, opts, &mut out)?;
-    drift |= generated_outcome.changed || generated_outcome.skipped;
-    skipped |= generated_outcome.skipped;
     let merge_outcome = import_merge_sources(root, &cfg, tools, opts, &mut out)?;
     drift |= merge_outcome.changed || merge_outcome.skipped;
     skipped |= merge_outcome.skipped;
@@ -320,18 +320,17 @@ fn import_generated_sources(
 fn generated_canonical_path(spec: &GenerateSpec, rel_to_native_root: &Path) -> Option<PathBuf> {
     let rel_display = repo_path(rel_to_native_root);
     let suffix = spec.suffix.as_deref().unwrap_or_default();
-    let mut rel = if suffix.is_empty() {
+    let rel = if suffix.is_empty() {
         // Drop only the file extension, preserving any parent directories so
         // recursive sources keep their structure instead of collapsing.
         let mut rel = rel_to_native_root.to_path_buf();
         if rel.extension().is_some() {
-            rel.set_extension("");
+            rel.set_extension("md");
         }
         rel
     } else {
-        PathBuf::from(rel_display.strip_suffix(suffix)?)
+        PathBuf::from(format!("{}.md", rel_display.strip_suffix(suffix)?))
     };
-    rel.set_extension("md");
     Some(spec.from.join(rel))
 }
 
@@ -375,8 +374,9 @@ fn import_tree(
     for entry in WalkDir::new(source_abs).min_depth(1) {
         let entry = entry?;
         let rel_to_source = entry.path().strip_prefix(source_abs)?;
-        let dest_abs = target_abs.join(rel_to_source);
-        let dest_rel = target_rel.join(rel_to_source);
+        let canonical_subpath = canonical_markdown_subpath(rel_to_source);
+        let dest_abs = target_abs.join(&canonical_subpath);
+        let dest_rel = target_rel.join(&canonical_subpath);
 
         if entry.file_type().is_dir() {
             if !dest_abs.exists() {
@@ -420,8 +420,11 @@ fn import_file_bytes(
     opts: MigrateOptions,
     out: &mut CommandOutput,
 ) -> Result<ImportOutcome> {
-    let source =
+    let mut source =
         stdfs::read(source_abs).map_err(|err| io_error("read native file", source_abs, err))?;
+    if let Some(normalized) = normalize_canonical_markdown(target_rel, &source)? {
+        source = normalized.into_bytes();
+    }
     match stdfs::read(target_abs) {
         Ok(existing) if existing == source => {
             out.push(format!("ok       {}", repo_path(target_rel)));
@@ -446,6 +449,60 @@ fn import_file_bytes(
         }
         Err(err) => Err(io_error("read existing canonical file", target_abs, err)),
     }
+}
+
+fn canonical_markdown_subpath(rel_to_source: &Path) -> PathBuf {
+    let mut rel = rel_to_source.to_path_buf();
+    let Some(file_name) = rel.file_name().and_then(|name| name.to_str()) else {
+        return rel;
+    };
+    for suffix in [".agent.md", ".prompt.md", ".instructions.md"] {
+        if let Some(base) = file_name.strip_suffix(suffix) {
+            rel.set_file_name(format!("{base}.md"));
+            return rel;
+        }
+    }
+    rel
+}
+
+fn normalize_canonical_markdown(target_rel: &Path, source: &[u8]) -> Result<Option<String>> {
+    if target_rel
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_none_or(|ext| !ext.eq_ignore_ascii_case("md"))
+    {
+        return Ok(None);
+    }
+    if !is_named_canonical_markdown(target_rel) {
+        return Ok(None);
+    }
+    let Ok(text) = std::str::from_utf8(source) else {
+        return Ok(None);
+    };
+    let mut doc = formats::markdown::parse(text)?;
+    if formats::markdown::str_value(&doc.frontmatter, "name")
+        .as_deref()
+        .is_some_and(|name| !name.trim().is_empty())
+    {
+        return Ok(None);
+    }
+    let Some(name) = target_rel.file_stem().and_then(|stem| stem.to_str()) else {
+        return Ok(None);
+    };
+    formats::markdown::set_string(&mut doc.frontmatter, "name", name);
+    formats::markdown::render(doc.frontmatter, &doc.body)
+        .map(ensure_trailing_newline)
+        .map(Some)
+}
+
+fn is_named_canonical_markdown(path: &Path) -> bool {
+    let components = path
+        .components()
+        .filter_map(|component| component.as_os_str().to_str())
+        .collect::<Vec<_>>();
+    components
+        .windows(2)
+        .any(|window| window == [".agent", "agents"] || window == [".agent", "commands"])
 }
 
 fn write_file_bytes(
@@ -733,14 +790,14 @@ fn is_starter_file(path: &Path, bytes: &[u8]) -> bool {
     };
     match repo_path(path).as_str() {
         "AGENTS.md" => text.trim() == "# Agents",
-        ".agents/mcp.json" => serde_json::from_str::<Value>(text)
+        ".agent/mcp.json" => serde_json::from_str::<Value>(text)
             .ok()
             .and_then(|value| value.get("mcpServers").and_then(Value::as_object).cloned())
             .is_some_and(|servers| servers.is_empty()),
-        ".agents/rules/code-style.md" => {
+        ".agent/rules/code-style.md" => {
             text == "---\npaths:\n- \"**/*.rs\"\n---\nUse clear, direct Rust code.\n"
         }
-        ".agents/skills/example-skill/SKILL.md" => {
+        ".agent/skills/example-skill/SKILL.md" => {
             text == "# Example Skill\n\nUse this as a placeholder skill.\n"
         }
         _ => false,
@@ -820,7 +877,7 @@ mod tests {
     #[test]
     fn generated_canonical_path_removes_compound_suffix() {
         let spec = GenerateSpec {
-            from: ".agents/agents".into(),
+            from: ".agent/agents".into(),
             to: ".github/agents".into(),
             format: crate::tool::Format::CopilotAgent,
             suffix: Some(".agent.md".into()),
@@ -831,14 +888,32 @@ mod tests {
 
         assert_eq!(
             generated_canonical_path(&spec, Path::new("reviewer.agent.md")).unwrap(),
-            PathBuf::from(".agents/agents/reviewer.md")
+            PathBuf::from(".agent/agents/reviewer.md")
+        );
+    }
+
+    #[test]
+    fn generated_canonical_path_preserves_dotted_basename() {
+        let spec = GenerateSpec {
+            from: ".agent/agents".into(),
+            to: ".github/agents".into(),
+            format: crate::tool::Format::CopilotAgent,
+            suffix: Some(".agent.md".into()),
+            recursive: false,
+            tool: None,
+            tools: None,
+        };
+
+        assert_eq!(
+            generated_canonical_path(&spec, Path::new("speckit.git.commit.agent.md")).unwrap(),
+            PathBuf::from(".agent/agents/speckit.git.commit.md")
         );
     }
 
     #[test]
     fn generated_canonical_path_preserves_subdirs_without_suffix() {
         let spec = GenerateSpec {
-            from: ".agents/commands".into(),
+            from: ".agent/commands".into(),
             to: ".opencode/commands".into(),
             format: crate::tool::Format::CopilotAgent,
             suffix: None,
@@ -849,7 +924,7 @@ mod tests {
 
         assert_eq!(
             generated_canonical_path(&spec, Path::new("group/build.md")).unwrap(),
-            PathBuf::from(".agents/commands/group/build.md")
+            PathBuf::from(".agent/commands/group/build.md")
         );
     }
 }

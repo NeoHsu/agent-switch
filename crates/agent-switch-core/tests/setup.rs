@@ -41,11 +41,11 @@ fn assert_absent(path: &Path) {
 
 fn fixture(root: &Path) -> Config {
     config::write_default_config(&root.join(".agent-switch.yaml"), false).unwrap();
-    fs::create_dir_all(root.join(".agents/skills")).unwrap();
-    fs::create_dir_all(root.join(".agents/agents")).unwrap();
-    fs::create_dir_all(root.join(".agents/commands")).unwrap();
-    fs::create_dir_all(root.join(".agents/rules")).unwrap();
-    write(&root.join(".agents/mcp.json"), "{}\n");
+    fs::create_dir_all(root.join(".agent/skills")).unwrap();
+    fs::create_dir_all(root.join(".agent/agents")).unwrap();
+    fs::create_dir_all(root.join(".agent/commands")).unwrap();
+    fs::create_dir_all(root.join(".agent/rules")).unwrap();
+    write(&root.join(".agent/mcp.json"), "{}\n");
     write(&root.join("AGENTS.md"), "# Agents\n");
     config::load_config(root, None).unwrap().0
 }
@@ -58,11 +58,23 @@ fn init_writes_agent_switch_config() {
     let out = init::run(root, None, false).unwrap();
 
     assert!(root.join(".agent-switch.yaml").exists());
+    let cfg = config::load_config(root, None).unwrap().0;
+    assert_eq!(cfg.agents_dir, Path::new(".agent"));
+    assert_eq!(cfg.manifest, Path::new(".agent/.sync-manifest.json"));
+    assert!(!cfg.symlinks.contains_key(".agent/rules"));
+    assert!(!cfg.symlinks.contains_key(".agent/workflows"));
+    assert!(!cfg.symlinks.contains_key(".agent/skills"));
     assert!(
         out.lines
             .iter()
             .any(|line| line == "created  .agent-switch.yaml")
     );
+    let gitignore = fs::read_to_string(root.join(".gitignore")).unwrap();
+    assert!(gitignore.contains(".agent/.sync-manifest.json"));
+    assert!(!gitignore.contains("\n.agent/\n"));
+    assert!(!gitignore.contains(".github/agents/"));
+    assert!(!gitignore.contains(".github/prompts/"));
+    assert!(!gitignore.contains(".github/instructions/"));
 }
 
 #[test]
@@ -101,6 +113,95 @@ fn init_with_copilot_uses_mcp_merge_instead_of_symlink() {
     assert_eq!(
         cfg.merge.keys().map(String::as_str).collect::<Vec<_>>(),
         vec!["copilot-mcp-config"]
+    );
+}
+
+#[test]
+fn setup_creates_nested_claude_links_for_nested_agents_files() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+    let cfg = fixture(root);
+    write(&root.join("packages/api/AGENTS.md"), "# API agents\n");
+    write(
+        &root.join(".agent/ignored/AGENTS.md"),
+        "# canonical metadata\n",
+    );
+
+    let out = setup::run(
+        root,
+        &cfg,
+        Some(&[Tool::Claude]),
+        SetupOptions {
+            no_sync: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert_managed_link(&root.join("packages/api/CLAUDE.md"));
+    assert_absent(&root.join(".agent/ignored/CLAUDE.md"));
+    assert!(out.lines.iter().any(|line| {
+        line.starts_with("created  packages/api/CLAUDE.md -> ") && line.contains("AGENTS.md")
+    }));
+}
+
+#[test]
+fn setup_does_not_create_nested_claude_links_for_other_tool_filters() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+    let cfg = fixture(root);
+    write(&root.join("packages/api/AGENTS.md"), "# API agents\n");
+
+    setup::run(
+        root,
+        &cfg,
+        Some(&[Tool::Codex]),
+        SetupOptions {
+            no_sync: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert_absent(&root.join("packages/api/CLAUDE.md"));
+}
+
+#[test]
+fn setup_prune_removes_nested_claude_links_for_unselected_tools() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+    let cfg = fixture(root);
+    write(&root.join("packages/api/AGENTS.md"), "# API agents\n");
+
+    setup::run(
+        root,
+        &cfg,
+        Some(&[Tool::Claude]),
+        SetupOptions {
+            no_sync: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_managed_link(&root.join("packages/api/CLAUDE.md"));
+
+    let out = setup::run(
+        root,
+        &cfg,
+        Some(&[Tool::Codex]),
+        SetupOptions {
+            no_sync: true,
+            prune: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert_absent(&root.join("packages/api/CLAUDE.md"));
+    assert!(
+        out.lines
+            .iter()
+            .any(|line| line == "removed: packages/api/CLAUDE.md")
     );
 }
 
@@ -234,13 +335,13 @@ fn doctor_reports_manifest_recovery_hint() {
     let temp = tempdir().unwrap();
     let root = temp.path();
     let cfg = fixture(root);
-    write(&root.join(".agents/.sync-manifest.json"), "{not json\n");
+    write(&root.join(".agent/.sync-manifest.json"), "{not json\n");
 
     let out = diagnostics::doctor(root, Some(&cfg), false).unwrap();
 
     assert!(
         out.lines.iter().any(|line| {
-            line == "warning: manifest is not parseable: .agents/.sync-manifest.json"
+            line == "warning: manifest is not parseable: .agent/.sync-manifest.json"
         })
     );
     assert!(
@@ -255,7 +356,7 @@ fn doctor_json_reports_manifest_recovery_hint() {
     let temp = tempdir().unwrap();
     let root = temp.path();
     let cfg = fixture(root);
-    write(&root.join(".agents/.sync-manifest.json"), "{not json\n");
+    write(&root.join(".agent/.sync-manifest.json"), "{not json\n");
 
     let out = diagnostics::doctor(root, Some(&cfg), true).unwrap();
     let report: serde_json::Value = serde_json::from_str(&out.lines[0]).unwrap();
@@ -263,7 +364,7 @@ fn doctor_json_reports_manifest_recovery_hint() {
     assert_eq!(report["manifest"].as_bool(), Some(false));
     assert_eq!(
         report["manifest_path"].as_str(),
-        Some(".agents/.sync-manifest.json")
+        Some(".agent/.sync-manifest.json")
     );
     assert!(
         report["manifest_error"]
@@ -454,11 +555,7 @@ fn setup_prune_removes_manifest_tracked_copy_fallback() {
     sync_manifest
         .links
         .insert(".pi/mcp.json".into(), manifest::sha256_text("{}\n"));
-    manifest::save(
-        &root.join(".agents/.sync-manifest.json"),
-        &mut sync_manifest,
-    )
-    .unwrap();
+    manifest::save(&root.join(".agent/.sync-manifest.json"), &mut sync_manifest).unwrap();
 
     let out = setup::run(
         root,
@@ -474,7 +571,7 @@ fn setup_prune_removes_manifest_tracked_copy_fallback() {
 
     assert!(out.lines.iter().any(|line| line == "removed: .pi/mcp.json"));
     assert_absent(&root.join(".pi/mcp.json"));
-    let next_manifest = manifest::load(&root.join(".agents/.sync-manifest.json")).unwrap();
+    let next_manifest = manifest::load(&root.join(".agent/.sync-manifest.json")).unwrap();
     assert!(!next_manifest.links.contains_key(".pi/mcp.json"));
 }
 

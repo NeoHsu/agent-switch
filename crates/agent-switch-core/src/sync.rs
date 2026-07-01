@@ -4,7 +4,12 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 
-use crate::{CommandOutput, Error, ExitCode, config::Config, manifest, tool::Tool};
+use crate::{
+    CommandOutput, Error, ExitCode,
+    config::{Config, SyncMode},
+    manifest,
+    tool::Tool,
+};
 
 mod context;
 mod event;
@@ -41,12 +46,19 @@ pub fn run(
     root: &Path,
     cfg: &Config,
     tools: Option<&[Tool]>,
-    opts: SyncOptions,
+    mut opts: SyncOptions,
 ) -> Result<CommandOutput> {
     if opts.import_only && opts.export_only {
         return Err(
             Error::Config("--import-only and --export-only are mutually exclusive".into()).into(),
         );
+    }
+    if !opts.import_only && !opts.export_only {
+        match cfg.sync_mode {
+            SyncMode::Full => {}
+            SyncMode::CanonicalOnly | SyncMode::ExportOnly => opts.export_only = true,
+            SyncMode::ImportOnly => opts.import_only = true,
+        }
     }
 
     let manifest_path = abs(root, &cfg.manifest);

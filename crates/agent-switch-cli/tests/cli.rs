@@ -86,7 +86,7 @@ fn sync_reset_manifest_rebuilds_corrupt_manifest() {
         .unwrap();
     assert_eq!(init.status.code(), Some(0));
 
-    let manifest_path = root.join(".agents/.sync-manifest.json");
+    let manifest_path = root.join(".agent/.sync-manifest.json");
     fs::write(&manifest_path, "{not json\n").unwrap();
 
     let output = Command::new(env!("CARGO_BIN_EXE_ags"))
@@ -100,7 +100,7 @@ fn sync_reset_manifest_rebuilds_corrupt_manifest() {
     assert_eq!(output.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("warning: reset manifest: rebuilding .agents/.sync-manifest.json"),
+        stdout.contains("warning: reset manifest: rebuilding .agent/.sync-manifest.json"),
         "stdout was: {stdout}"
     );
     let manifest: serde_json::Value =
@@ -139,7 +139,7 @@ fn verbose_sync_json_keeps_stdout_machine_readable() {
         "stderr was: {stderr}"
     );
     assert!(
-        stderr.contains("verbose: sync stages: import, export, remove-stale, sync-links, merge"),
+        stderr.contains("verbose: sync stages: export, remove-stale, sync-links, merge"),
         "stderr was: {stderr}"
     );
 }

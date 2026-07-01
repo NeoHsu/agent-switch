@@ -1,7 +1,7 @@
 use anyhow::Result;
 
 use crate::{
-    config,
+    config::{self, ManagedLink},
     fs::{copy_file, is_fake_symlink, relative_link, repo_path},
     manifest,
 };
@@ -41,75 +41,102 @@ fn sync_link_copies(
         if !config::symlink_selected(link, spec, ctx.tools) {
             continue;
         }
-        let link_rel = std::path::Path::new(link);
-        let target_rel = spec.target();
-        let target_cfg = spec.target_config();
-        let link_abs = ctx.abs(link_rel);
-        let target_abs = ctx.abs(target_rel);
+        changed |= sync_link_copy(
+            ctx,
+            manifest,
+            report,
+            &ManagedLink {
+                link: link.into(),
+                target: spec.target().to_path_buf(),
+                target_config: spec.target_config(),
+            },
+        )?;
+    }
 
-        if link_abs.is_symlink() || !target_abs.is_file() {
-            continue;
-        }
-
-        let rel_target = relative_link(&link_abs, &target_abs);
-        if is_fake_symlink(&link_abs, &rel_target, &target_cfg) {
-            report.push(SyncEvent::Warning {
-                message: format!(
-                    "{} is an unrestored git symlink placeholder; run `ags setup`",
-                    repo_path(link_rel)
-                ),
-            });
-            continue;
-        }
-
-        if !link_abs.exists() && target_abs.exists() {
-            changed = true;
-            let target_bytes = std::fs::read(&target_abs)?;
-            if !ctx.check {
-                copy_file(&target_abs, &link_abs)?;
-                manifest
-                    .links
-                    .insert(repo_path(link_rel), manifest::sha256_bytes(&target_bytes));
-            }
-            report.push(SyncEvent::Copied {
-                from: repo_path(target_rel),
-                to: repo_path(link_rel),
-            });
-            continue;
-        }
-
-        if !link_abs.is_file() {
-            continue;
-        }
-
-        let link_bytes = std::fs::read(&link_abs)?;
-        let target_bytes = std::fs::read(&target_abs)?;
-        let current_hash = manifest::sha256_bytes(&link_bytes);
-        let tracked = manifest.links.get(&repo_path(link_rel)).cloned();
-
-        if tracked.as_deref() != Some(&current_hash) {
-            changed = true;
-            if !ctx.check {
-                copy_file(&link_abs, &target_abs)?;
-                manifest.links.insert(repo_path(link_rel), current_hash);
-            }
-            report.push(SyncEvent::Copied {
-                from: repo_path(link_rel),
-                to: repo_path(target_rel),
-            });
-        } else if link_bytes != target_bytes {
-            changed = true;
-            let target_hash = manifest::sha256_bytes(&target_bytes);
-            if !ctx.check {
-                copy_file(&target_abs, &link_abs)?;
-                manifest.links.insert(repo_path(link_rel), target_hash);
-            }
-            report.push(SyncEvent::Copied {
-                from: repo_path(target_rel),
-                to: repo_path(link_rel),
-            });
+    if ctx
+        .tools
+        .is_none_or(|tools| tools.contains(&crate::tool::Tool::Claude))
+    {
+        for link in config::claude_instruction_links(ctx.root)? {
+            changed |= sync_link_copy(ctx, manifest, report, &link)?;
         }
     }
 
     Ok(changed)
+}
+
+fn sync_link_copy(
+    ctx: &SyncContext,
+    manifest: &mut crate::manifest::Manifest,
+    report: &mut SyncReport,
+    managed: &ManagedLink,
+) -> Result<bool> {
+    let link_rel = managed.link.as_path();
+    let target_rel = managed.target.as_path();
+    let link_abs = ctx.abs(link_rel);
+    let target_abs = ctx.abs(target_rel);
+
+    if link_abs.is_symlink() || !target_abs.is_file() {
+        return Ok(false);
+    }
+
+    let rel_target = relative_link(&link_abs, &target_abs);
+    if is_fake_symlink(&link_abs, &rel_target, &managed.target_config) {
+        report.push(SyncEvent::Warning {
+            message: format!(
+                "{} is an unrestored git symlink placeholder; run `ags setup`",
+                repo_path(link_rel)
+            ),
+        });
+        return Ok(false);
+    }
+
+    if !link_abs.exists() && target_abs.exists() {
+        let target_bytes = std::fs::read(&target_abs)?;
+        if !ctx.check {
+            copy_file(&target_abs, &link_abs)?;
+            manifest
+                .links
+                .insert(repo_path(link_rel), manifest::sha256_bytes(&target_bytes));
+        }
+        report.push(SyncEvent::Copied {
+            from: repo_path(target_rel),
+            to: repo_path(link_rel),
+        });
+        return Ok(true);
+    }
+
+    if !link_abs.is_file() {
+        return Ok(false);
+    }
+
+    let link_bytes = std::fs::read(&link_abs)?;
+    let target_bytes = std::fs::read(&target_abs)?;
+    let current_hash = manifest::sha256_bytes(&link_bytes);
+    let tracked = manifest.links.get(&repo_path(link_rel)).cloned();
+
+    if tracked.as_deref() != Some(&current_hash) {
+        if !ctx.check {
+            copy_file(&link_abs, &target_abs)?;
+            manifest.links.insert(repo_path(link_rel), current_hash);
+        }
+        report.push(SyncEvent::Copied {
+            from: repo_path(link_rel),
+            to: repo_path(target_rel),
+        });
+        return Ok(true);
+    } else if link_bytes != target_bytes {
+        let target_hash = manifest::sha256_bytes(&target_bytes);
+        if !ctx.check {
+            copy_file(&target_abs, &link_abs)?;
+            manifest.links.insert(repo_path(link_rel), target_hash);
+        }
+        report.push(SyncEvent::Copied {
+            from: repo_path(target_rel),
+            to: repo_path(link_rel),
+        });
+        return Ok(true);
+    }
+
+    Ok(false)
 }

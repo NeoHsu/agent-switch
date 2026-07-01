@@ -64,16 +64,15 @@ fn migrate_claude_imports_native_files_and_sets_up_links() {
         fs::read_to_string(root.join("AGENTS.md")).unwrap(),
         "# Existing Claude instructions\n"
     );
-    assert_eq!(
-        fs::read_to_string(root.join(".agents/commands/fix.md")).unwrap(),
-        "Fix the bug.\n"
-    );
+    let command = fs::read_to_string(root.join(".agent/commands/fix.md")).unwrap();
+    assert!(command.contains("name: fix"));
+    assert!(command.contains("Fix the bug."));
     assert!(root.join("CLAUDE.md.bak").exists());
     assert!(root.join(".claude/commands.bak/fix.md").exists());
     assert!(root.join("CLAUDE.md").exists() || root.join("CLAUDE.md").is_symlink());
     assert!(root.join(".claude/commands").exists() || root.join(".claude/commands").is_symlink());
     let mcp: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(root.join(".agents/mcp.json")).unwrap()).unwrap();
+        serde_json::from_str(&fs::read_to_string(root.join(".agent/mcp.json")).unwrap()).unwrap();
     assert_eq!(mcp["mcpServers"]["context7"]["command"], "npx");
     assert!(
         out.lines
@@ -139,7 +138,7 @@ fn migrate_imports_generated_tool_formats_into_one_canonical_agent() {
     )
     .unwrap();
 
-    let canonical = fs::read_to_string(root.join(".agents/agents/reviewer.md")).unwrap();
+    let canonical = fs::read_to_string(root.join(".agent/agents/reviewer.md")).unwrap();
     assert!(canonical.contains("name: reviewer"));
     assert!(canonical.contains("copilot:"));
     assert!(canonical.contains("theme: blue"));
@@ -148,16 +147,81 @@ fn migrate_imports_generated_tool_formats_into_one_canonical_agent() {
 }
 
 #[test]
-fn migrate_imports_opencode_pi_and_antigravity_sources() {
+fn migrate_preserves_dotted_copilot_names_and_native_suffixes() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+    write(
+        &root.join(".github/agents/speckit.git.commit.agent.md"),
+        "---\ndescription: Commits spec work.\n---\nCommit the work.\n",
+    );
+    write(
+        &root.join(".github/prompts/speckit.plan.prompt.md"),
+        "---\ndescription: Plans spec work.\n---\nPlan the work.\n",
+    );
+    write(
+        &root.join(".claude/agents/tps2.orchestrator.agent.md"),
+        "---\ndescription: Orchestrates TPS2.\n---\nOrchestrate.\n",
+    );
+
+    migrate::run(
+        root,
+        None,
+        Some(&[Tool::Claude, Tool::Copilot]),
+        migrate::MigrateOptions {
+            no_setup: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    let agent = fs::read_to_string(root.join(".agent/agents/speckit.git.commit.md")).unwrap();
+    assert!(agent.contains("name: speckit.git.commit"));
+    let command = fs::read_to_string(root.join(".agent/commands/speckit.plan.md")).unwrap();
+    assert!(command.contains("name: speckit.plan"));
+    let claude_agent = fs::read_to_string(root.join(".agent/agents/tps2.orchestrator.md")).unwrap();
+    assert!(claude_agent.contains("name: tps2.orchestrator"));
+    assert!(
+        !root
+            .join(".agent/agents/tps2.orchestrator.agent.md")
+            .exists()
+    );
+}
+
+#[test]
+fn migrate_prefers_copilot_instruction_over_claude_pointer_rule() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+    write(
+        &root.join(".github/instructions/go.instructions.md"),
+        "---\napplyTo: \"**/*.go\"\n---\nUse the full Go coding standard.\n",
+    );
+    write(
+        &root.join(".claude/rules/go.md"),
+        "---\npaths:\n- \"**/*.go\"\n---\nFollow .github/instructions/go.instructions.md\n",
+    );
+
+    migrate::run(
+        root,
+        None,
+        Some(&[Tool::Claude, Tool::Copilot]),
+        migrate::MigrateOptions {
+            no_setup: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    let rule = fs::read_to_string(root.join(".agent/rules/go.md")).unwrap();
+    assert!(rule.contains("Use the full Go coding standard."));
+    assert!(rule.contains("paths:"));
+    assert!(!rule.contains("Follow .github/instructions"));
+}
+
+#[test]
+fn migrate_imports_opencode_and_pi_sources() {
     let temp = tempdir().unwrap();
     let root = temp.path();
     write(&root.join(".opencode/commands/build.md"), "Build it.\n");
-    write(&root.join(".agent/rules/security.md"), "Keep it safe.\n");
-    write(&root.join(".agent/workflows/ship.md"), "Ship it.\n");
-    write(
-        &root.join(".agent/skills/demo/SKILL.md"),
-        "# Demo\n\nUse demo skill.\n",
-    );
     write(
         &root.join("opencode.json"),
         r#"{
@@ -184,7 +248,7 @@ fn migrate_imports_opencode_pi_and_antigravity_sources() {
     migrate::run(
         root,
         None,
-        Some(&[Tool::Opencode, Tool::Pi, Tool::Antigravity]),
+        Some(&[Tool::Opencode, Tool::Pi]),
         migrate::MigrateOptions {
             no_setup: true,
             ..Default::default()
@@ -192,24 +256,13 @@ fn migrate_imports_opencode_pi_and_antigravity_sources() {
     )
     .unwrap();
 
-    assert_eq!(
-        fs::read_to_string(root.join(".agents/commands/build.md")).unwrap(),
-        "Build it.\n"
-    );
-    assert_eq!(
-        fs::read_to_string(root.join(".agents/commands/ship.md")).unwrap(),
-        "Ship it.\n"
-    );
-    assert_eq!(
-        fs::read_to_string(root.join(".agents/rules/security.md")).unwrap(),
-        "Keep it safe.\n"
-    );
-    assert!(root.join(".agents/skills/demo/SKILL.md").exists());
+    let command = fs::read_to_string(root.join(".agent/commands/build.md")).unwrap();
+    assert!(command.contains("name: build"));
+    assert!(command.contains("Build it."));
     assert!(root.join(".opencode/commands.bak/build.md").exists());
-    assert!(root.join(".agent/rules.bak/security.md").exists());
     assert!(root.join(".pi/mcp.json.bak").exists());
     let mcp: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(root.join(".agents/mcp.json")).unwrap()).unwrap();
+        serde_json::from_str(&fs::read_to_string(root.join(".agent/mcp.json")).unwrap()).unwrap();
     assert_eq!(mcp["mcpServers"]["local"]["command"], "npx");
     assert_eq!(mcp["mcpServers"]["local"]["args"][0], "demo-mcp");
     assert_eq!(mcp["mcpServers"]["pi-server"]["command"], "node");

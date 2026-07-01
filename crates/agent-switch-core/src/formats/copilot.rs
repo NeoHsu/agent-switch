@@ -1,5 +1,7 @@
 //! GitHub Copilot agent, prompt, and instruction import/export.
 
+use std::path::Path;
+
 use anyhow::Result;
 
 use crate::Error;
@@ -17,14 +19,15 @@ pub fn export_agent(source: &str) -> Result<String> {
     render(fm, &doc.body)
 }
 
-pub fn import_agent(source: &str) -> Result<String> {
+pub fn import_agent(path: &Path, source: &str) -> Result<String> {
     let doc = markdown::parse(source)?;
-    let fm = canonical_with_tool_ns(
+    let mut fm = canonical_with_tool_ns(
         "copilot",
         &doc.frontmatter,
         &["name", "description"],
         &["name", "description"],
     );
+    infer_missing_name(path, ".agent.md", &mut fm);
     render(fm, &doc.body)
 }
 
@@ -34,10 +37,18 @@ pub fn export_prompt(source: &str) -> Result<String> {
     render(fm, &doc.body)
 }
 
-pub fn import_prompt(source: &str) -> Result<String> {
+pub fn import_prompt(path: &Path, source: &str) -> Result<String> {
     // Prompt and agent formats are identical on import. Kept as a separate
     // function so any future divergence only requires changes here.
-    import_agent(source)
+    let doc = markdown::parse(source)?;
+    let mut fm = canonical_with_tool_ns(
+        "copilot",
+        &doc.frontmatter,
+        &["name", "description"],
+        &["name", "description"],
+    );
+    infer_missing_name(path, ".prompt.md", &mut fm);
+    render(fm, &doc.body)
 }
 
 pub fn export_instructions(source: &str) -> Result<String> {
@@ -69,5 +80,25 @@ fn require_string(map: &noyalib::Mapping, key: &str, format: &str) -> Result<()>
     match str_value(map, key) {
         Some(value) if !value.trim().is_empty() => Ok(()),
         _ => Err(Error::Config(format!("{format} requires `{key}`")).into()),
+    }
+}
+
+pub fn native_basename(path: &Path, suffix: &str) -> Option<String> {
+    let file_name = path.file_name()?.to_str()?;
+    file_name
+        .strip_suffix(suffix)
+        .map(ToOwned::to_owned)
+        .or_else(|| path.file_stem()?.to_str().map(ToOwned::to_owned))
+}
+
+fn infer_missing_name(path: &Path, suffix: &str, fm: &mut noyalib::Mapping) {
+    if str_value(fm, "name")
+        .as_deref()
+        .is_some_and(|name| !name.trim().is_empty())
+    {
+        return;
+    }
+    if let Some(name) = native_basename(path, suffix) {
+        set_string(fm, "name", name);
     }
 }
