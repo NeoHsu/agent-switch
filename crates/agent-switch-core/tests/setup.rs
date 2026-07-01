@@ -69,6 +69,8 @@ fn init_writes_agent_switch_config() {
             .iter()
             .any(|line| line == "created  .agent-switch.yaml")
     );
+    let config_text = fs::read_to_string(root.join(".agent-switch.yaml")).unwrap();
+    assert!(!config_text.contains('\\'));
     let gitignore = fs::read_to_string(root.join(".gitignore")).unwrap();
     assert!(gitignore.contains(".agent/.sync-manifest.json"));
     assert!(!gitignore.contains("\n.agent/\n"));

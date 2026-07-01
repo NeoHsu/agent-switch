@@ -13,7 +13,7 @@ use walkdir::{DirEntry, WalkDir};
 
 use crate::{
     Error,
-    fs::{atomic_write, read_text},
+    fs::{atomic_write, read_text, repo_path},
     tool::{self, Format, MergeFormat, Tool},
 };
 
@@ -45,19 +45,14 @@ pub struct ManagedLink {
     pub target_config: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum SyncMode {
     Full,
+    #[default]
     CanonicalOnly,
     ExportOnly,
     ImportOnly,
-}
-
-impl Default for SyncMode {
-    fn default() -> Self {
-        Self::CanonicalOnly
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -234,7 +229,7 @@ impl Config {
                 let target = if *target == "AGENTS.md" {
                     PathBuf::from(target)
                 } else {
-                    agents_dir.join(target)
+                    repo_join(&agents_dir, target)
                 };
                 (link.to_string(), SymlinkSpec::Target(target))
             })
@@ -245,7 +240,7 @@ impl Config {
                 (
                     id.to_string(),
                     GenerateSpec {
-                        from: agents_dir.join(from),
+                        from: repo_join(&agents_dir, from),
                         to: to.into(),
                         format,
                         suffix: Some(suffix.to_string()),
@@ -285,7 +280,7 @@ impl Config {
         .map(|(id, tracking)| (id.to_string(), tracking))
         .collect();
 
-        let manifest = agents_dir.join(".sync-manifest.json");
+        let manifest = repo_join(&agents_dir, ".sync-manifest.json");
 
         Self {
             version: 1,
@@ -297,6 +292,15 @@ impl Config {
             generate,
             merge,
         }
+    }
+}
+
+fn repo_join(base: &Path, child: &str) -> PathBuf {
+    let base = repo_path(base);
+    if base.is_empty() {
+        PathBuf::from(child)
+    } else {
+        PathBuf::from(format!("{base}/{child}"))
     }
 }
 
