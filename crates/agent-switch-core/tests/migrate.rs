@@ -64,7 +64,7 @@ fn migrate_claude_imports_native_files_and_sets_up_links() {
         fs::read_to_string(root.join("AGENTS.md")).unwrap(),
         "# Existing Claude instructions\n"
     );
-    let command = fs::read_to_string(root.join(".agent/commands/fix.md")).unwrap();
+    let command = fs::read_to_string(root.join(".agents/commands/fix.md")).unwrap();
     assert!(command.contains("name: fix"));
     assert!(command.contains("Fix the bug."));
     assert!(root.join("CLAUDE.md.bak").exists());
@@ -72,7 +72,7 @@ fn migrate_claude_imports_native_files_and_sets_up_links() {
     assert!(root.join("CLAUDE.md").exists() || root.join("CLAUDE.md").is_symlink());
     assert!(root.join(".claude/commands").exists() || root.join(".claude/commands").is_symlink());
     let mcp: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(root.join(".agent/mcp.json")).unwrap()).unwrap();
+        serde_json::from_str(&fs::read_to_string(root.join(".agents/mcp.json")).unwrap()).unwrap();
     assert_eq!(mcp["mcpServers"]["context7"]["command"], "npx");
     assert!(
         out.lines
@@ -138,7 +138,7 @@ fn migrate_imports_generated_tool_formats_into_one_canonical_agent() {
     )
     .unwrap();
 
-    let canonical = fs::read_to_string(root.join(".agent/agents/reviewer.md")).unwrap();
+    let canonical = fs::read_to_string(root.join(".agents/agents/reviewer.md")).unwrap();
     assert!(canonical.contains("name: reviewer"));
     assert!(canonical.contains("copilot:"));
     assert!(canonical.contains("theme: blue"));
@@ -174,15 +174,16 @@ fn migrate_preserves_dotted_copilot_names_and_native_suffixes() {
     )
     .unwrap();
 
-    let agent = fs::read_to_string(root.join(".agent/agents/speckit.git.commit.md")).unwrap();
+    let agent = fs::read_to_string(root.join(".agents/agents/speckit.git.commit.md")).unwrap();
     assert!(agent.contains("name: speckit.git.commit"));
-    let command = fs::read_to_string(root.join(".agent/commands/speckit.plan.md")).unwrap();
+    let command = fs::read_to_string(root.join(".agents/commands/speckit.plan.md")).unwrap();
     assert!(command.contains("name: speckit.plan"));
-    let claude_agent = fs::read_to_string(root.join(".agent/agents/tps2.orchestrator.md")).unwrap();
+    let claude_agent =
+        fs::read_to_string(root.join(".agents/agents/tps2.orchestrator.md")).unwrap();
     assert!(claude_agent.contains("name: tps2.orchestrator"));
     assert!(
         !root
-            .join(".agent/agents/tps2.orchestrator.agent.md")
+            .join(".agents/agents/tps2.orchestrator.agent.md")
             .exists()
     );
 }
@@ -211,7 +212,7 @@ fn migrate_prefers_copilot_instruction_over_claude_pointer_rule() {
     )
     .unwrap();
 
-    let rule = fs::read_to_string(root.join(".agent/rules/go.md")).unwrap();
+    let rule = fs::read_to_string(root.join(".agents/rules/go.md")).unwrap();
     assert!(rule.contains("Use the full Go coding standard."));
     assert!(rule.contains("paths:"));
     assert!(!rule.contains("Follow .github/instructions"));
@@ -256,13 +257,13 @@ fn migrate_imports_opencode_and_pi_sources() {
     )
     .unwrap();
 
-    let command = fs::read_to_string(root.join(".agent/commands/build.md")).unwrap();
+    let command = fs::read_to_string(root.join(".agents/commands/build.md")).unwrap();
     assert!(command.contains("name: build"));
     assert!(command.contains("Build it."));
     assert!(root.join(".opencode/commands.bak/build.md").exists());
     assert!(root.join(".pi/mcp.json.bak").exists());
     let mcp: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(root.join(".agent/mcp.json")).unwrap()).unwrap();
+        serde_json::from_str(&fs::read_to_string(root.join(".agents/mcp.json")).unwrap()).unwrap();
     assert_eq!(mcp["mcpServers"]["local"]["command"], "npx");
     assert_eq!(mcp["mcpServers"]["local"]["args"][0], "demo-mcp");
     assert_eq!(mcp["mcpServers"]["pi-server"]["command"], "node");

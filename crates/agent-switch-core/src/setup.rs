@@ -143,8 +143,7 @@ fn setup_link(
         return Ok(true);
     }
 
-    if !link_abs.is_symlink() && link_abs.is_file() && sync_manifest.links.contains_key(&link_key)
-    {
+    if !link_abs.is_symlink() && link_abs.is_file() && sync_manifest.links.contains_key(&link_key) {
         // A copy fallback this tool created earlier; sync reconciles its
         // content, so setup only reports it.
         out.push(format!("ok       {link_key} (managed copy)"));

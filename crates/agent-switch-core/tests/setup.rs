@@ -41,11 +41,11 @@ fn assert_absent(path: &Path) {
 
 fn fixture(root: &Path) -> Config {
     config::write_default_config(&root.join(".agent-switch.yaml"), false).unwrap();
-    fs::create_dir_all(root.join(".agent/skills")).unwrap();
-    fs::create_dir_all(root.join(".agent/agents")).unwrap();
-    fs::create_dir_all(root.join(".agent/commands")).unwrap();
-    fs::create_dir_all(root.join(".agent/rules")).unwrap();
-    write(&root.join(".agent/mcp.json"), "{}\n");
+    fs::create_dir_all(root.join(".agents/skills")).unwrap();
+    fs::create_dir_all(root.join(".agents/agents")).unwrap();
+    fs::create_dir_all(root.join(".agents/commands")).unwrap();
+    fs::create_dir_all(root.join(".agents/rules")).unwrap();
+    write(&root.join(".agents/mcp.json"), "{}\n");
     write(&root.join("AGENTS.md"), "# Agents\n");
     config::load_config(root, None).unwrap().0
 }
@@ -59,11 +59,11 @@ fn init_writes_agent_switch_config() {
 
     assert!(root.join(".agent-switch.yaml").exists());
     let cfg = config::load_config(root, None).unwrap().0;
-    assert_eq!(cfg.agents_dir, Path::new(".agent"));
-    assert_eq!(cfg.manifest, Path::new(".agent/.sync-manifest.json"));
-    assert!(!cfg.symlinks.contains_key(".agent/rules"));
-    assert!(!cfg.symlinks.contains_key(".agent/workflows"));
-    assert!(!cfg.symlinks.contains_key(".agent/skills"));
+    assert_eq!(cfg.agents_dir, Path::new(".agents"));
+    assert_eq!(cfg.manifest, Path::new(".agents/.sync-manifest.json"));
+    assert!(cfg.symlinks.contains_key(".agent/rules"));
+    assert!(cfg.symlinks.contains_key(".agent/workflows"));
+    assert!(cfg.symlinks.contains_key(".agent/skills"));
     assert!(
         out.lines
             .iter()
@@ -72,11 +72,21 @@ fn init_writes_agent_switch_config() {
     let config_text = fs::read_to_string(root.join(".agent-switch.yaml")).unwrap();
     assert!(!config_text.contains('\\'));
     let gitignore = fs::read_to_string(root.join(".gitignore")).unwrap();
-    assert!(gitignore.contains(".agent/.sync-manifest.json"));
-    assert!(!gitignore.contains("\n.agent/\n"));
+    assert!(gitignore.contains(".agents/.sync-manifest.json"));
+    assert!(!gitignore.contains("\n.agents/\n"));
     assert!(!gitignore.contains(".github/agents/"));
     assert!(!gitignore.contains(".github/prompts/"));
     assert!(!gitignore.contains(".github/instructions/"));
+}
+
+#[test]
+fn for_agents_dir_drops_links_inside_canonical_dir() {
+    let cfg = Config::for_agents_dir(".agent".into());
+
+    assert!(!cfg.symlinks.contains_key(".agent/rules"));
+    assert!(!cfg.symlinks.contains_key(".agent/workflows"));
+    assert!(!cfg.symlinks.contains_key(".agent/skills"));
+    assert!(cfg.symlinks.contains_key(".claude/rules"));
 }
 
 #[test]
@@ -125,7 +135,7 @@ fn setup_creates_nested_claude_links_for_nested_agents_files() {
     let cfg = fixture(root);
     write(&root.join("packages/api/AGENTS.md"), "# API agents\n");
     write(
-        &root.join(".agent/ignored/AGENTS.md"),
+        &root.join(".agents/ignored/AGENTS.md"),
         "# canonical metadata\n",
     );
 
@@ -141,7 +151,7 @@ fn setup_creates_nested_claude_links_for_nested_agents_files() {
     .unwrap();
 
     assert_managed_link(&root.join("packages/api/CLAUDE.md"));
-    assert_absent(&root.join(".agent/ignored/CLAUDE.md"));
+    assert_absent(&root.join(".agents/ignored/CLAUDE.md"));
     assert!(out.lines.iter().any(|line| {
         line.starts_with("created  packages/api/CLAUDE.md -> ") && line.contains("AGENTS.md")
     }));
@@ -337,13 +347,13 @@ fn doctor_reports_manifest_recovery_hint() {
     let temp = tempdir().unwrap();
     let root = temp.path();
     let cfg = fixture(root);
-    write(&root.join(".agent/.sync-manifest.json"), "{not json\n");
+    write(&root.join(".agents/.sync-manifest.json"), "{not json\n");
 
     let out = diagnostics::doctor(root, Some(&cfg), false).unwrap();
 
     assert!(
         out.lines.iter().any(|line| {
-            line == "warning: manifest is not parseable: .agent/.sync-manifest.json"
+            line == "warning: manifest is not parseable: .agents/.sync-manifest.json"
         })
     );
     assert!(
@@ -358,7 +368,7 @@ fn doctor_json_reports_manifest_recovery_hint() {
     let temp = tempdir().unwrap();
     let root = temp.path();
     let cfg = fixture(root);
-    write(&root.join(".agent/.sync-manifest.json"), "{not json\n");
+    write(&root.join(".agents/.sync-manifest.json"), "{not json\n");
 
     let out = diagnostics::doctor(root, Some(&cfg), true).unwrap();
     let report: serde_json::Value = serde_json::from_str(&out.lines[0]).unwrap();
@@ -366,7 +376,7 @@ fn doctor_json_reports_manifest_recovery_hint() {
     assert_eq!(report["manifest"].as_bool(), Some(false));
     assert_eq!(
         report["manifest_path"].as_str(),
-        Some(".agent/.sync-manifest.json")
+        Some(".agents/.sync-manifest.json")
     );
     assert!(
         report["manifest_error"]
@@ -557,7 +567,11 @@ fn setup_prune_removes_manifest_tracked_copy_fallback() {
     sync_manifest
         .links
         .insert(".pi/mcp.json".into(), manifest::sha256_text("{}\n"));
-    manifest::save(&root.join(".agent/.sync-manifest.json"), &mut sync_manifest).unwrap();
+    manifest::save(
+        &root.join(".agents/.sync-manifest.json"),
+        &mut sync_manifest,
+    )
+    .unwrap();
 
     let out = setup::run(
         root,
@@ -573,7 +587,7 @@ fn setup_prune_removes_manifest_tracked_copy_fallback() {
 
     assert!(out.lines.iter().any(|line| line == "removed: .pi/mcp.json"));
     assert_absent(&root.join(".pi/mcp.json"));
-    let next_manifest = manifest::load(&root.join(".agent/.sync-manifest.json")).unwrap();
+    let next_manifest = manifest::load(&root.join(".agents/.sync-manifest.json")).unwrap();
     assert!(!next_manifest.links.contains_key(".pi/mcp.json"));
 }
 
@@ -613,7 +627,7 @@ fn setup_check_prune_reports_drift_without_removing() {
 
 fn write_reviewer_agent(root: &Path) {
     write(
-        &root.join(".agent/agents/reviewer.md"),
+        &root.join(".agents/agents/reviewer.md"),
         "---\nname: reviewer\ndescription: Reviews code.\n---\nReview the diff.\n",
     );
 }
@@ -656,7 +670,7 @@ fn setup_prune_removes_generated_outputs_and_merge_targets_for_unselected_tools(
     assert!(root.join(".codex/agents/reviewer.toml").exists());
     assert!(root.join(".codex/config.toml").exists());
 
-    let tracked = manifest::load(&root.join(".agent/.sync-manifest.json")).unwrap();
+    let tracked = manifest::load(&root.join(".agents/.sync-manifest.json")).unwrap();
     assert!(
         !tracked
             .generated
@@ -709,7 +723,7 @@ fn setup_prune_cleans_codex_marker_block_preserving_user_content() {
     let cfg = fixture(root);
     write_reviewer_agent(root);
     write(
-        &root.join(".agent/mcp.json"),
+        &root.join(".agents/mcp.json"),
         "{\n  \"mcpServers\": {\n    \"demo\": {\"command\": \"npx\"}\n  }\n}\n",
     );
     write(&root.join(".codex/config.toml"), "theme = \"dark\"\n");

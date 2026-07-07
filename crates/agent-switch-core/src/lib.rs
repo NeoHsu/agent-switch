@@ -1,4 +1,4 @@
-//! Core library for synchronizing canonical `.agent/` files with native agent tool formats.
+//! Core library for synchronizing canonical `.agents/` files with native agent tool formats.
 
 pub mod config;
 pub mod diagnostics;

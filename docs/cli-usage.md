@@ -1,8 +1,8 @@
 # CLI Usage Guide
 
-`ags` keeps a canonical `.agent/` directory synchronized with the native
+`ags` keeps a canonical `.agents/` directory synchronized with the native
 formats used by coding-agent tools. For the default coding-agent path mapping,
-see [Canonical `.agent/` Files](canonical-files.md#default-integration-map).
+see [Canonical `.agents/` Files](canonical-files.md#default-integration-map).
 
 ## Command Surface Review
 
@@ -15,7 +15,7 @@ The command surface is:
   and consolidate them later.
 - `setup` is for preparing native tool entry points and optionally pruning old
   managed links.
-- `sync` is for converting between canonical `.agent/` files and native tool
+- `sync` is for converting between canonical `.agents/` files and native tool
   formats.
 - `doctor` is for diagnostics and drift checks.
 - `mappings validate` is for config validation in CI or preflight scripts.
@@ -53,10 +53,10 @@ machine-readable.
 
 Use `migrate` as the normal onboarding path when a repository already has native
 coding-agent files, or when developers first use those tools and later decide to
-standardize on `.agent/`.
+standardize on `.agents/`.
 
 Use `init` only when the repository has no native agent files yet and you want to
-author `.agent/` first.
+author `.agents/` first.
 
 ```text
 Repo has native agent files?
@@ -67,7 +67,7 @@ Repo has native agent files?
   yes        no
    |         |
    v         v
-ags migrate  Want to create .agent/ now?
+ags migrate  Want to create .agents/ now?
              |
         +----+----+
         |         |
@@ -132,12 +132,12 @@ ags migrate --no-setup
 ```
 
 `migrate` creates `.agent-switch.yaml` if needed. For managed-link mappings it
-copies native files such as `CLAUDE.md`, `.claude/commands`, `.agent/rules`, or
+copies native files such as `CLAUDE.md`, `.claude/commands`, `.agents/rules`, or
 `.opencode/commands` into their canonical targets, then backs up the native
 paths as `.bak` so `setup` can create managed links, Windows directory
 junctions, or file-copy fallbacks as needed. For generated formats it imports
-`.github`, `.codex`, and `.opencode` generated files into `.agent/`.
-For MCP configs it imports known native MCP shapes into `.agent/mcp.json`.
+`.github`, `.codex`, and `.opencode` generated files into `.agents/`.
+For MCP configs it imports known native MCP shapes into `.agents/mcp.json`.
 Conflicting canonical files are skipped unless `--force` is used. Use
 `--keep-native` when you want to preserve native files instead of backing them
 up.
@@ -154,7 +154,7 @@ ags setup
 When Claude is selected, setup also discovers nested `AGENTS.md` files and
 creates managed same-directory `CLAUDE.md` links or copy fallbacks. For example,
 `packages/api/AGENTS.md` becomes `packages/api/CLAUDE.md`. Tool output and
-hidden management directories such as `.agent/`, `.claude/`, `.github/`, and
+hidden management directories such as `.agents/`, `.claude/`, `.github/`, and
 `.git/` are skipped.
 
 Prepare only one or more tools:
@@ -211,7 +211,7 @@ The default generated config uses `sync_mode: canonical-only`, so plain
 4. merge canonical MCP config into native config files
 
 Set `sync_mode: full` or pass `--import-only` when you explicitly want to pull
-managed native edits back into canonical `.agent/` files.
+managed native edits back into canonical `.agents/` files.
 
 Check drift without writing:
 
@@ -261,7 +261,7 @@ combined with either one to test one direction without writing files.
 
 ## Migrating Native Files
 
-Populate `.agent/` from existing native files:
+Populate `.agents/` from existing native files:
 
 ```bash
 ags --tool claude,copilot migrate
@@ -309,7 +309,7 @@ If no config file exists, choose the onboarding path that matches the repository
 # Existing native agent files, or native-first workflow
 ags migrate
 
-# No native files yet, and you want a canonical .agent/ skeleton
+# No native files yet, and you want a canonical .agents/ skeleton
 ags init
 ```
 
@@ -320,7 +320,7 @@ ags sync --reset-manifest
 ```
 
 `ags doctor` reports the manifest path and the same recovery hint. If an older
-script cannot pass `--reset-manifest`, deleting `.agent/.sync-manifest.json`
+script cannot pass `--reset-manifest`, deleting `.agents/.sync-manifest.json`
 and then running `ags sync` is equivalent. Permission errors include the
 attempted action and path, for example creating a parent directory, creating a
 symlink, or replacing a generated file.
@@ -345,7 +345,7 @@ version string is enough.
 
 ## CI Patterns
 
-Recommended canonical-only drift check when `.agent/` is the source of truth and
+Recommended canonical-only drift check when `.agents/` is the source of truth and
 native generated files should not be imported back:
 
 ```bash
@@ -353,7 +353,7 @@ ags sync --check --export-only
 ```
 
 Recommended full drift check when tool-side generated edits are allowed to import
-back into `.agent/`:
+back into `.agents/`:
 
 ```bash
 ags sync --check

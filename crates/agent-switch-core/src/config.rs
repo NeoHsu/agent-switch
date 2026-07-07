@@ -144,11 +144,11 @@ fn explicit_tools(tool: Option<Tool>, tools: Option<&[Tool]>) -> Option<Vec<Tool
 }
 
 fn default_agents_dir() -> PathBuf {
-    PathBuf::from(".agent")
+    PathBuf::from(".agents")
 }
 
 fn default_manifest() -> PathBuf {
-    PathBuf::from(".agent/.sync-manifest.json")
+    PathBuf::from(".agents/.sync-manifest.json")
 }
 
 const DEFAULT_SYMLINKS: &[(&str, &str)] = &[
@@ -157,6 +157,9 @@ const DEFAULT_SYMLINKS: &[(&str, &str)] = &[
     (".claude/commands", "commands"),
     (".claude/rules", "rules"),
     (".opencode/commands", "commands"),
+    (".agent/rules", "rules"),
+    (".agent/workflows", "commands"),
+    (".agent/skills", "skills"),
     (".mcp.json", "mcp.json"),
     (".pi/mcp.json", "mcp.json"),
     ("CLAUDE.md", "AGENTS.md"),
@@ -225,6 +228,9 @@ impl Config {
     pub fn for_agents_dir(agents_dir: PathBuf) -> Self {
         let symlinks = DEFAULT_SYMLINKS
             .iter()
+            // A tool whose native directory IS the canonical dir reads it
+            // directly; linking a path into itself would be degenerate.
+            .filter(|(link, _)| !Path::new(link).starts_with(&agents_dir))
             .map(|(link, target)| {
                 let target = if *target == "AGENTS.md" {
                     PathBuf::from(target)
@@ -351,7 +357,7 @@ pub fn find_root(explicit: Option<&Path>) -> Result<PathBuf> {
     let mut dir = env::current_dir()?;
     loop {
         if dir.join(CONFIG_FILE).exists()
-            || dir.join(".agent").exists()
+            || dir.join(".agents").exists()
             || dir.join(".git").exists()
         {
             return Ok(dir);

@@ -500,9 +500,12 @@ fn is_named_canonical_markdown(path: &Path) -> bool {
         .components()
         .filter_map(|component| component.as_os_str().to_str())
         .collect::<Vec<_>>();
-    components
-        .windows(2)
-        .any(|window| window == [".agent", "agents"] || window == [".agent", "commands"])
+    components.windows(2).any(|window| {
+        matches!(
+            window,
+            [".agents" | ".agent", "agents"] | [".agents" | ".agent", "commands"]
+        )
+    })
 }
 
 fn write_file_bytes(
@@ -799,14 +802,14 @@ fn is_starter_file(path: &Path, bytes: &[u8]) -> bool {
     };
     match repo_path(path).as_str() {
         "AGENTS.md" => text.trim() == "# Agents",
-        ".agent/mcp.json" => serde_json::from_str::<Value>(text)
+        ".agents/mcp.json" | ".agent/mcp.json" => serde_json::from_str::<Value>(text)
             .ok()
             .and_then(|value| value.get("mcpServers").and_then(Value::as_object).cloned())
             .is_some_and(|servers| servers.is_empty()),
-        ".agent/rules/code-style.md" => {
+        ".agents/rules/code-style.md" | ".agent/rules/code-style.md" => {
             text == "---\npaths:\n- \"**/*.rs\"\n---\nUse clear, direct Rust code.\n"
         }
-        ".agent/skills/example-skill/SKILL.md" => {
+        ".agents/skills/example-skill/SKILL.md" | ".agent/skills/example-skill/SKILL.md" => {
             text == "# Example Skill\n\nUse this as a placeholder skill.\n"
         }
         _ => false,

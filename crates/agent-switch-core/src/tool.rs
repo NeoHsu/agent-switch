@@ -163,7 +163,7 @@ pub fn tools_for_link(link: &str, target: &str) -> &'static [Tool] {
             return tools;
         }
     }
-    if target.contains(".agent/skills") {
+    if target.contains(".agents/skills") || target.contains(".agent/skills") {
         return SKILLS_TARGET_TOOLS;
     }
     &[]

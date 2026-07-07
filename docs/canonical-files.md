@@ -1,12 +1,12 @@
-# Canonical `.agent/` Files
+# Canonical `.agents/` Files
 
-Agent Switch treats `.agent/` as the repository-owned source of truth and
+Agent Switch treats `.agents/` as the repository-owned source of truth and
 converts those files into each supported tool's native layout.
 
 ## Directory Layout
 
 ```text
-.agent/
+.agents/
 ├── agents/       reusable subagents
 ├── commands/     command and prompt definitions
 ├── rules/        coding rules and instructions
@@ -41,38 +41,38 @@ written by `ags sync`.
 | Canonical source | Claude | Codex | Copilot | OpenCode | Pi | Antigravity |
 | --- | --- | --- | --- | --- | --- | --- |
 | `AGENTS.md` | `CLAUDE.md` link/copy | — | — | — | — | — |
-| `.agent/agents/*.md` | `.claude/agents` link/copy | `.codex/agents/*.toml` generated | `.github/agents/*.agent.md` generated | `.opencode/agents/*.md` generated | — | direct |
-| `.agent/commands/*.md` | `.claude/commands` link/copy | — | `.github/prompts/*.prompt.md` generated | `.opencode/commands` link/copy | — | direct |
-| `.agent/rules/**/*.md` | `.claude/rules` link/copy | — | `.github/instructions/**/*.instructions.md` generated recursively | — | — | direct |
-| `.agent/skills/*` | `.claude/skills` link/copy | no managed output | no managed output | — | `.claude/skills` link/copy | direct |
-| `.agent/mcp.json` | `.mcp.json` link/copy | `.codex/config.toml` merged marker block | `.copilot/mcp-config.json` converted/merged | `opencode.json` merged | `.pi/mcp.json` link/copy | — |
+| `.agents/agents/*.md` | `.claude/agents` link/copy | `.codex/agents/*.toml` generated | `.github/agents/*.agent.md` generated | `.opencode/agents/*.md` generated | — | — |
+| `.agents/commands/*.md` | `.claude/commands` link/copy | — | `.github/prompts/*.prompt.md` generated | `.opencode/commands` link/copy | — | `.agent/workflows` link/copy |
+| `.agents/rules/**/*.md` | `.claude/rules` link/copy | — | `.github/instructions/**/*.instructions.md` generated recursively | — | — | `.agent/rules` link/copy |
+| `.agents/skills/*` | `.claude/skills` link/copy | no managed output | no managed output | — | `.claude/skills` link/copy | `.agent/skills` link/copy |
+| `.agents/mcp.json` | `.mcp.json` link/copy | `.codex/config.toml` merged marker block | `.copilot/mcp-config.json` converted/merged | `opencode.json` merged | `.pi/mcp.json` link/copy | — |
 
 Tool-level view:
 
 | Tool | Native paths managed by default | Canonical source | Notes |
 | --- | --- | --- | --- |
-| Claude | `.claude/agents`, `.claude/commands`, `.claude/rules`, `.claude/skills`, `CLAUDE.md`, `.mcp.json` | `.agent/agents`, `.agent/commands`, `.agent/rules`, `.agent/skills`, `AGENTS.md`, `.agent/mcp.json` | Direct managed-link integration; edits through real symlinks or Windows junctions affect canonical files immediately. |
-| Codex | `.codex/agents/*.toml`, `.codex/config.toml` | `.agent/agents/*.md`, `.agent/mcp.json` | Agents are exported as TOML; MCP is rendered into an Agent Switch marker block. |
-| Copilot | `.github/agents/*.agent.md`, `.github/prompts/*.prompt.md`, `.github/instructions/**/*.instructions.md`, `.copilot/mcp-config.json` | `.agent/agents`, `.agent/commands`, `.agent/rules`, `.agent/mcp.json` | Agents, prompts, and instructions are generated Markdown; MCP is converted to Copilot's config shape. |
-| OpenCode | `.opencode/commands`, `.opencode/agents/*.md`, `opencode.json` | `.agent/commands`, `.agent/agents`, `.agent/mcp.json` | Commands are linked/copied; agents are generated with OpenCode metadata; MCP is merged into `opencode.json`. |
-| Pi | `.claude/skills`, `.pi/mcp.json` | `.agent/skills`, `.agent/mcp.json` | Uses Claude-compatible skills plus a managed Pi MCP config link. |
-| Antigravity | `.agent/` | `.agent/rules`, `.agent/commands`, `.agent/skills` | Reads the canonical layout directly. |
+| Claude | `.claude/agents`, `.claude/commands`, `.claude/rules`, `.claude/skills`, `CLAUDE.md`, `.mcp.json` | `.agents/agents`, `.agents/commands`, `.agents/rules`, `.agents/skills`, `AGENTS.md`, `.agents/mcp.json` | Direct managed-link integration; edits through real symlinks or Windows junctions affect canonical files immediately. |
+| Codex | `.codex/agents/*.toml`, `.codex/config.toml` | `.agents/agents/*.md`, `.agents/mcp.json` | Agents are exported as TOML; MCP is rendered into an Agent Switch marker block. |
+| Copilot | `.github/agents/*.agent.md`, `.github/prompts/*.prompt.md`, `.github/instructions/**/*.instructions.md`, `.copilot/mcp-config.json` | `.agents/agents`, `.agents/commands`, `.agents/rules`, `.agents/mcp.json` | Agents, prompts, and instructions are generated Markdown; MCP is converted to Copilot's config shape. |
+| OpenCode | `.opencode/commands`, `.opencode/agents/*.md`, `opencode.json` | `.agents/commands`, `.agents/agents`, `.agents/mcp.json` | Commands are linked/copied; agents are generated with OpenCode metadata; MCP is merged into `opencode.json`. |
+| Pi | `.claude/skills`, `.pi/mcp.json` | `.agents/skills`, `.agents/mcp.json` | Uses Claude-compatible skills plus a managed Pi MCP config link. |
+| Antigravity | `.agent/rules`, `.agent/workflows`, `.agent/skills` | `.agents/rules`, `.agents/commands`, `.agents/skills` | Rules, workflows, and skills are exposed through managed links. |
 
 Sync behavior by integration type:
 
 | Integration type | Written by | Import behavior |
 | --- | --- | --- |
 | `link/copy` | `ags setup`; Windows file-copy fallbacks are reconciled by `ags sync` | `ags migrate` imports existing native files before replacing them with managed links, junctions, or file-copy fallbacks. Real symlink and junction edits directly update the canonical target. File-copy fallback edits can be copied back during `ags sync`. |
-| `generated` | `ags sync` export stage | `ags migrate` imports existing generated files. Later `ags sync` can import tool-side generated edits back into `.agent/` unless `--export-only` is used. |
-| `merged` | `ags sync` merge stage | `ags migrate` imports known native MCP shapes into `.agent/mcp.json`. Later sync merges canonical MCP config back to native configs. |
+| `generated` | `ags sync` export stage | `ags migrate` imports existing generated files. Later `ags sync` can import tool-side generated edits back into `.agents/` unless `--export-only` is used. |
+| `merged` | `ags sync` merge stage | `ags migrate` imports known native MCP shapes into `.agents/mcp.json`. Later sync merges canonical MCP config back to native configs. |
 
 A dash (`—`) means Agent Switch has no default managed output for that tool and
-canonical source type. A tool may still read `.agent/` directly if it supports
+canonical source type. A tool may still read `.agents/` directly if it supports
 that behavior independently of Agent Switch.
 
 ## Agents
 
-Canonical agents are Markdown files under `.agent/agents/`. Frontmatter fields
+Canonical agents are Markdown files under `.agents/agents/`. Frontmatter fields
 shared by multiple tools stay at the top level. Tool-specific fields live in a
 tool namespace such as `copilot`, `opencode`, or `codex`.
 
@@ -114,7 +114,7 @@ preserving other tool namespaces where possible.
 
 ## Commands and Prompts
 
-Canonical commands are Markdown files under `.agent/commands/`.
+Canonical commands are Markdown files under `.agents/commands/`.
 
 ```markdown
 ---
@@ -130,13 +130,14 @@ Default mappings use this content in two ways:
 
 | Tool | Behavior |
 | --- | --- |
-| Claude | `.claude/commands` links or copies `.agent/commands` |
-| OpenCode | `.opencode/commands` links or copies `.agent/commands` |
+| Claude | `.claude/commands` links or copies `.agents/commands` |
+| OpenCode | `.opencode/commands` links or copies `.agents/commands` |
+| Antigravity | `.agent/workflows` links or copies `.agents/commands` |
 | Copilot | exports `.github/prompts/*.prompt.md` |
 
 ## Rules and Instructions
 
-Canonical rules are Markdown files under `.agent/rules/`. Nested rule files are
+Canonical rules are Markdown files under `.agents/rules/`. Nested rule files are
 supported by the default Copilot instructions mapping.
 
 ```markdown
@@ -157,26 +158,27 @@ Default mappings use rules in these ways:
 
 | Tool | Behavior |
 | --- | --- |
-| Claude | `.claude/rules` links or copies `.agent/rules` |
+| Claude | `.claude/rules` links or copies `.agents/rules` |
+| Antigravity | `.agent/rules` links or copies `.agents/rules` |
 | Copilot | exports recursive `.github/instructions/*.instructions.md` |
 
 ## Skills
 
-Canonical skills live under `.agent/skills/`, typically one directory per skill
+Canonical skills live under `.agents/skills/`, typically one directory per skill
 with a `SKILL.md` file:
 
 ```text
-.agent/skills/example-skill/SKILL.md
+.agents/skills/example-skill/SKILL.md
 ```
 
-Default mappings expose skills through `.claude/skills` and Pi's
-Claude-compatible skills path. Codex, Antigravity, and GitHub Copilot can also
-discover skills directly from `.agent/skills` in supported environments, so no
-generated copy is needed for those tools.
+Default mappings expose skills through `.claude/skills`, `.agent/skills`, and
+Pi's Claude-compatible skills path. Codex and GitHub Copilot can also discover
+skills directly from `.agents/skills` in supported environments, so no generated
+copy is needed for those tools.
 
 ## MCP Config
 
-The canonical MCP config is `.agent/mcp.json`:
+The canonical MCP config is `.agents/mcp.json`:
 
 ```json
 {
@@ -196,9 +198,9 @@ Default mappings expose or merge this file as:
 
 | Tool | Behavior |
 | --- | --- |
-| Claude | `.mcp.json` links or copies `.agent/mcp.json` |
+| Claude | `.mcp.json` links or copies `.agents/mcp.json` |
 | Copilot | converts to `.copilot/mcp-config.json` with Copilot `type` and `tools` fields |
-| Pi | `.pi/mcp.json` links or copies `.agent/mcp.json` for Pi-compatible adapters |
+| Pi | `.pi/mcp.json` links or copies `.agents/mcp.json` for Pi-compatible adapters |
 | OpenCode | merges into `opencode.json` |
 | Codex | merges into `.codex/config.toml` |
 

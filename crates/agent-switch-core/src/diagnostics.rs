@@ -17,7 +17,7 @@ pub fn doctor(root: &Path, cfg: Option<&Config>, json_output: bool) -> Result<Co
     let mut out = CommandOutput::default();
     let agents_dir = cfg
         .map(|c| c.agents_dir.as_path())
-        .unwrap_or_else(|| Path::new(".agent"));
+        .unwrap_or_else(|| Path::new(".agents"));
     let agents_exists = abs(root, agents_dir).exists();
     let config_exists = root.join(CONFIG_FILE).exists();
     let manifest_path = cfg
