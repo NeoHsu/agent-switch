@@ -504,7 +504,7 @@ fn sync_does_not_overwrite_unmanaged_link_files() {
             .iter()
             .any(|line| { line.starts_with("warning: CLAUDE.md is an unmanaged real file") })
     );
-    let tracked = manifest::load(&root.join(".agents/.sync-manifest.json")).unwrap();
+    let tracked = manifest::load(&root.join(".agent/.sync-manifest.json")).unwrap();
     assert!(!tracked.links.contains_key("CLAUDE.md"));
 
     // Once generated outputs are in sync, an unmanaged file that sync cannot
@@ -527,19 +527,19 @@ fn sync_recreates_missing_manifest_tracked_copy() {
     let temp = tempdir().unwrap();
     let root = temp.path();
     let cfg = fixture(root);
-    let canonical = fs::read_to_string(root.join(".agents/mcp.json")).unwrap();
+    let canonical = fs::read_to_string(root.join(".agent/mcp.json")).unwrap();
     let mut tracked = manifest::Manifest::default();
     tracked
         .links
         .insert(".pi/mcp.json".into(), manifest::sha256_text(&canonical));
-    manifest::save(&root.join(".agents/.sync-manifest.json"), &mut tracked).unwrap();
+    manifest::save(&root.join(".agent/.sync-manifest.json"), &mut tracked).unwrap();
 
     let out = sync::run(root, &cfg, None, SyncOptions::default()).unwrap();
 
     assert!(
         out.lines
             .iter()
-            .any(|line| line == "copied: .agents/mcp.json -> .pi/mcp.json")
+            .any(|line| line == "copied: .agent/mcp.json -> .pi/mcp.json")
     );
     assert_eq!(
         fs::read_to_string(root.join(".pi/mcp.json")).unwrap(),
@@ -553,7 +553,7 @@ fn import_preserves_canonical_name_when_opencode_stem_differs() {
     let root = temp.path();
     let cfg = fixture(root);
     write(
-        &root.join(".agents/agents/review-bot.md"),
+        &root.join(".agent/agents/review-bot.md"),
         "---\nname: reviewer-name\ndescription: Reviews things.\n---\nBody.\n",
     );
 
@@ -567,7 +567,7 @@ fn import_preserves_canonical_name_when_opencode_stem_differs() {
 
     sync::run(root, &cfg, None, SyncOptions::default()).unwrap();
 
-    let canonical = fs::read_to_string(root.join(".agents/agents/review-bot.md")).unwrap();
+    let canonical = fs::read_to_string(root.join(".agent/agents/review-bot.md")).unwrap();
     assert!(
         canonical.contains("name: reviewer-name"),
         "canonical name must not be replaced by the file stem: {canonical}"

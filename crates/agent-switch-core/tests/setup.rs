@@ -613,7 +613,7 @@ fn setup_check_prune_reports_drift_without_removing() {
 
 fn write_reviewer_agent(root: &Path) {
     write(
-        &root.join(".agents/agents/reviewer.md"),
+        &root.join(".agent/agents/reviewer.md"),
         "---\nname: reviewer\ndescription: Reviews code.\n---\nReview the diff.\n",
     );
 }
@@ -656,7 +656,7 @@ fn setup_prune_removes_generated_outputs_and_merge_targets_for_unselected_tools(
     assert!(root.join(".codex/agents/reviewer.toml").exists());
     assert!(root.join(".codex/config.toml").exists());
 
-    let tracked = manifest::load(&root.join(".agents/.sync-manifest.json")).unwrap();
+    let tracked = manifest::load(&root.join(".agent/.sync-manifest.json")).unwrap();
     assert!(
         !tracked
             .generated
@@ -709,7 +709,7 @@ fn setup_prune_cleans_codex_marker_block_preserving_user_content() {
     let cfg = fixture(root);
     write_reviewer_agent(root);
     write(
-        &root.join(".agents/mcp.json"),
+        &root.join(".agent/mcp.json"),
         "{\n  \"mcpServers\": {\n    \"demo\": {\"command\": \"npx\"}\n  }\n}\n",
     );
     write(&root.join(".codex/config.toml"), "theme = \"dark\"\n");
