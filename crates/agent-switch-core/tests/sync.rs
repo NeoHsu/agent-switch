@@ -480,3 +480,70 @@ fn stale_generated_file_is_removed_when_source_is_deleted() {
     );
     assert!(!root.join(".codex/agents/reviewer.toml").exists());
 }
+
+#[test]
+fn sync_does_not_overwrite_unmanaged_link_files() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+    let cfg = fixture(root);
+    write(&root.join("AGENTS.md"), "# Canonical\n");
+    write(&root.join("CLAUDE.md"), "# Private notes\n");
+
+    let out = sync::run(root, &cfg, None, SyncOptions::default()).unwrap();
+
+    assert_eq!(
+        fs::read_to_string(root.join("AGENTS.md")).unwrap(),
+        "# Canonical\n"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("CLAUDE.md")).unwrap(),
+        "# Private notes\n"
+    );
+    assert!(
+        out.lines
+            .iter()
+            .any(|line| { line.starts_with("warning: CLAUDE.md is an unmanaged real file") })
+    );
+    let tracked = manifest::load(&root.join(".agents/.sync-manifest.json")).unwrap();
+    assert!(!tracked.links.contains_key("CLAUDE.md"));
+
+    // Once generated outputs are in sync, an unmanaged file that sync cannot
+    // fix must not flag drift in check mode.
+    let check = sync::run(
+        root,
+        &cfg,
+        None,
+        SyncOptions {
+            check: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(check.exit(), ExitCode::Ok);
+}
+
+#[test]
+fn sync_recreates_missing_manifest_tracked_copy() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+    let cfg = fixture(root);
+    let canonical = fs::read_to_string(root.join(".agents/mcp.json")).unwrap();
+    let mut tracked = manifest::Manifest::default();
+    tracked
+        .links
+        .insert(".pi/mcp.json".into(), manifest::sha256_text(&canonical));
+    manifest::save(&root.join(".agents/.sync-manifest.json"), &mut tracked).unwrap();
+
+    let out = sync::run(root, &cfg, None, SyncOptions::default()).unwrap();
+
+    assert!(
+        out.lines
+            .iter()
+            .any(|line| line == "copied: .agents/mcp.json -> .pi/mcp.json")
+    );
+    assert_eq!(
+        fs::read_to_string(root.join(".pi/mcp.json")).unwrap(),
+        canonical
+    );
+}
+
