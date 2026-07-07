@@ -325,7 +325,7 @@ pub fn load_config(root: &Path, explicit: Option<&Path>) -> Result<(Config, Path
             Error::Config(format!("failed to read config {}: {err}", path.display()))
         }
     })?;
-    let cfg: Config = noyalib::from_str(&content)
+    let cfg: Config = serde_norway::from_str(&content)
         .map_err(|err| Error::Config(format!("invalid config {}: {err}", path.display())))?;
     validate_config(&cfg)?;
     Ok((cfg, path))
@@ -335,7 +335,7 @@ pub fn write_config(path: &Path, cfg: &Config, force: bool) -> Result<bool> {
     if path.exists() && !force {
         return Ok(false);
     }
-    let text = noyalib::to_string(cfg)?;
+    let text = serde_norway::to_string(cfg)?;
     atomic_write(path, text.as_bytes())?;
     Ok(true)
 }

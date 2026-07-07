@@ -609,8 +609,9 @@ fn merge_imported_markdown(
         .then(|| existing_doc.frontmatter.get("name").cloned())
         .flatten();
     for (key, existing_value) in existing_doc.frontmatter {
-        match fm.get_mut(key.as_str()) {
-            Some(imported_value) if key.as_str() == current_tool.name() => {
+        let is_current_tool_ns = key.as_str() == Some(current_tool.name());
+        match fm.get_mut(&key) {
+            Some(imported_value) if is_current_tool_ns => {
                 merge_yaml_mapping_values(imported_value, existing_value);
             }
             Some(_) => {}
@@ -620,7 +621,7 @@ fn merge_imported_markdown(
         }
     }
     if let Some(name) = existing_name {
-        fm.insert("name", name);
+        fm.insert("name".into(), name);
     }
     let body = if imported_body.is_empty() {
         existing_doc.body
@@ -632,8 +633,8 @@ fn merge_imported_markdown(
         .map(Some)
 }
 
-fn merge_yaml_mapping_values(target: &mut noyalib::Value, existing: noyalib::Value) {
-    let (Some(target_map), noyalib::Value::Mapping(existing_map)) =
+fn merge_yaml_mapping_values(target: &mut serde_norway::Value, existing: serde_norway::Value) {
+    let (Some(target_map), serde_norway::Value::Mapping(existing_map)) =
         (target.as_mapping_mut(), existing)
     else {
         return;

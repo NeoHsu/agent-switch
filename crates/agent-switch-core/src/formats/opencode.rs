@@ -27,7 +27,7 @@ pub fn import_agent(path: &Path, source: &str) -> Result<String> {
         return render(fm, &doc.body);
     }
     if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-        let mut with_name = noyalib::Mapping::new();
+        let mut with_name = serde_norway::Mapping::new();
         set_string(&mut with_name, "name", stem);
         merge_mapping(&mut with_name, fm);
         fm = with_name;

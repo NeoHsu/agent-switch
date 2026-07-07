@@ -111,19 +111,20 @@ fn preserve_existing_canonical_fields(
     let current_tool = format.tool().name();
     let existing_name = existing_doc.frontmatter.get("name").cloned();
     for (key, value) in existing_doc.frontmatter {
-        let key_str = key.as_str();
-        let is_other_tool_ns =
-            Tool::iter().any(|tool| tool.name() == key_str) && key_str != current_tool;
-        let preserve = matches!(key_str, "tools" | "model") || is_other_tool_ns;
-        if preserve && !imported_doc.frontmatter.contains_key(key_str) {
-            imported_doc.frontmatter.insert(key_str, value);
+        let preserve = key.as_str().is_some_and(|key_str| {
+            let is_other_tool_ns =
+                Tool::iter().any(|tool| tool.name() == key_str) && key_str != current_tool;
+            matches!(key_str, "tools" | "model") || is_other_tool_ns
+        });
+        if preserve && !imported_doc.frontmatter.contains_key(&key) {
+            imported_doc.frontmatter.insert(key, value);
         }
     }
     // OpenCode has no native `name` field; the imported name is always derived
     // from the file stem, so an explicit canonical name must win.
     if format == Format::OpencodeAgent {
         if let Some(name) = existing_name {
-            imported_doc.frontmatter.insert("name", name);
+            imported_doc.frontmatter.insert("name".into(), name);
         }
     }
     formats::markdown::render(imported_doc.frontmatter, &imported_doc.body)

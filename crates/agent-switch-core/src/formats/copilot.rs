@@ -76,7 +76,7 @@ pub fn import_instructions(source: &str) -> Result<String> {
     render(fm, &doc.body)
 }
 
-fn require_string(map: &noyalib::Mapping, key: &str, format: &str) -> Result<()> {
+fn require_string(map: &serde_norway::Mapping, key: &str, format: &str) -> Result<()> {
     match str_value(map, key) {
         Some(value) if !value.trim().is_empty() => Ok(()),
         _ => Err(Error::Config(format!("{format} requires `{key}`")).into()),
@@ -91,7 +91,7 @@ pub fn native_basename(path: &Path, suffix: &str) -> Option<String> {
         .or_else(|| path.file_stem()?.to_str().map(ToOwned::to_owned))
 }
 
-fn infer_missing_name(path: &Path, suffix: &str, fm: &mut noyalib::Mapping) {
+fn infer_missing_name(path: &Path, suffix: &str, fm: &mut serde_norway::Mapping) {
     if str_value(fm, "name")
         .as_deref()
         .is_some_and(|name| !name.trim().is_empty())

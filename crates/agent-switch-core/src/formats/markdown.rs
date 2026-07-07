@@ -3,7 +3,7 @@
 use std::borrow::Cow;
 
 use anyhow::Result;
-use noyalib::{Mapping, Value};
+use serde_norway::{Mapping, Value};
 
 #[derive(Debug, Clone)]
 pub struct MarkdownDoc {
@@ -34,7 +34,7 @@ pub fn parse(input: &str) -> Result<MarkdownDoc> {
     let frontmatter = if yaml.trim().is_empty() {
         Mapping::new()
     } else {
-        noyalib::from_str::<Mapping>(yaml)?
+        serde_norway::from_str::<Mapping>(yaml)?
     };
     Ok(MarkdownDoc {
         frontmatter,
@@ -70,7 +70,7 @@ pub fn render(frontmatter: Mapping, body: &str) -> Result<String> {
     if frontmatter.is_empty() {
         return Ok(body.to_string());
     }
-    let mut yaml = noyalib::to_string(&frontmatter)?;
+    let mut yaml = serde_norway::to_string(&frontmatter)?;
     // Ensure the closing `---` fence appears on its own line.
     if !yaml.ends_with('\n') {
         yaml.push('\n');
@@ -94,7 +94,7 @@ pub fn mapping_value(map: &Mapping, key: &str) -> Mapping {
 }
 
 pub fn set_string(map: &mut Mapping, key: &str, value: impl Into<String>) {
-    map.insert(key, Value::String(value.into()));
+    map.insert(key.into(), Value::String(value.into()));
 }
 
 pub fn merge_mapping(map: &mut Mapping, other: Mapping) {
@@ -106,7 +106,7 @@ pub fn merge_mapping(map: &mut Mapping, other: Mapping) {
 pub fn namespace_from_extra(base: &Mapping, exclude: &[&str]) -> Mapping {
     let mut out = Mapping::new();
     for (key, value) in base {
-        if !exclude.contains(&key.as_str()) {
+        if key.as_str().is_none_or(|key| !exclude.contains(&key)) {
             out.insert(key.clone(), value.clone());
         }
     }
@@ -117,7 +117,7 @@ pub fn base_with_namespace(source: &Mapping, namespace: &str, include: &[&str]) 
     let mut out = Mapping::new();
     for key in include {
         if let Some(value) = source.get(key) {
-            out.insert(*key, value.clone());
+            out.insert((*key).into(), value.clone());
         }
     }
     let ns = mapping_value(source, namespace);
@@ -134,12 +134,12 @@ pub fn canonical_with_tool_ns(
     let mut out = Mapping::new();
     for key in base_keys {
         if let Some(value) = generated.get(key) {
-            out.insert(*key, value.clone());
+            out.insert((*key).into(), value.clone());
         }
     }
     let ns = namespace_from_extra(generated, exclude);
     if !ns.is_empty() {
-        out.insert(tool, Value::Mapping(ns));
+        out.insert(tool.into(), Value::Mapping(ns));
     }
     out
 }
@@ -176,7 +176,7 @@ pub fn apply_to_to_paths(apply_to: Option<String>, frontmatter: &mut Mapping) {
         .map(|s| Value::String(s.into()))
         .collect::<Vec<_>>();
     if !values.is_empty() {
-        frontmatter.insert("paths", Value::Sequence(values));
+        frontmatter.insert("paths".into(), Value::Sequence(values));
     }
 }
 

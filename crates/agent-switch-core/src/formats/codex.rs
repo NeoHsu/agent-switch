@@ -1,7 +1,7 @@
 //! Codex agent TOML import/export.
 
 use anyhow::Result;
-use noyalib::{Mapping, Value};
+use serde_norway::{Mapping, Value};
 use toml_edit::{DocumentMut, InlineTable, Item, Table, value};
 
 use crate::Error;
@@ -27,7 +27,10 @@ pub fn export_agent(source: &str) -> Result<String> {
         out["description"] = value(description);
     }
     for (key, val) in markdown::mapping_value(&doc.frontmatter, "codex") {
-        out[key.as_str()] = yaml_to_toml(val);
+        let Some(key) = key.as_str() else {
+            continue;
+        };
+        out[key] = yaml_to_toml(val);
     }
     out["developer_instructions"] = value(doc.body.trim_end().to_string());
     Ok(out.to_string())
@@ -48,10 +51,10 @@ pub fn import_agent(source: &str) -> Result<String> {
         if matches!(key, "name" | "description" | "developer_instructions") {
             continue;
         }
-        codex.insert(key, toml_to_yaml(item));
+        codex.insert(key.into(), toml_to_yaml(item));
     }
     if !codex.is_empty() {
-        fm.insert("codex", Value::Mapping(codex));
+        fm.insert("codex".into(), Value::Mapping(codex));
     }
     let body = doc
         .get("developer_instructions")
@@ -65,7 +68,10 @@ fn yaml_to_toml(yaml_value: Value) -> Item {
         Value::Mapping(map) => {
             let mut table = Table::new();
             for (key, val) in map {
-                table[key.as_str()] = yaml_to_toml(val);
+                let Some(key) = key.as_str() else {
+                    continue;
+                };
+                table[key] = yaml_to_toml(val);
             }
             Item::Table(table)
         }
@@ -84,11 +90,12 @@ fn yaml_to_toml_value(yaml_value: Value) -> toml_edit::Value {
     match yaml_value {
         Value::Bool(v) => toml_edit::Value::from(v),
         Value::Number(v) => {
-            // as_i64() returns Some only for whole numbers; as_f64() always succeeds.
+            // as_i64() returns Some only for whole numbers; non-numeric edge
+            // cases (e.g. NaN parsed oddly) fall back to 0.0.
             if let Some(i) = v.as_i64() {
                 toml_edit::Value::from(i)
             } else {
-                toml_edit::Value::from(v.as_f64())
+                toml_edit::Value::from(v.as_f64().unwrap_or_default())
             }
         }
         Value::String(v) => toml_edit::Value::from(v),
@@ -99,6 +106,9 @@ fn yaml_to_toml_value(yaml_value: Value) -> toml_edit::Value {
         Value::Mapping(map) => {
             let mut table = InlineTable::new();
             for (key, val) in map {
+                let Some(key) = key.as_str() else {
+                    continue;
+                };
                 table.insert(key, yaml_to_toml_value(val));
             }
             toml_edit::Value::InlineTable(table)
@@ -143,7 +153,7 @@ fn toml_value_to_yaml(value: &toml_edit::Value) -> Value {
 fn table_to_yaml(table: &Table) -> Value {
     let mut map = Mapping::new();
     for (key, item) in table.iter() {
-        map.insert(key, toml_to_yaml(item));
+        map.insert(key.into(), toml_to_yaml(item));
     }
     Value::Mapping(map)
 }
@@ -151,7 +161,7 @@ fn table_to_yaml(table: &Table) -> Value {
 fn inline_table_to_yaml(table: &InlineTable) -> Value {
     let mut map = Mapping::new();
     for (key, value) in table.iter() {
-        map.insert(key, toml_value_to_yaml(value));
+        map.insert(key.into(), toml_value_to_yaml(value));
     }
     Value::Mapping(map)
 }
@@ -159,7 +169,7 @@ fn inline_table_to_yaml(table: &InlineTable) -> Value {
 fn value_to_string(value: Value) -> String {
     match value {
         Value::String(s) => s,
-        other => noyalib::to_string(&other)
+        other => serde_norway::to_string(&other)
             .unwrap_or_default()
             .trim()
             .to_string(),
