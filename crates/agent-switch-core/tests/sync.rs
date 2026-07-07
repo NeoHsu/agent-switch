@@ -547,3 +547,30 @@ fn sync_recreates_missing_manifest_tracked_copy() {
     );
 }
 
+#[test]
+fn import_preserves_canonical_name_when_opencode_stem_differs() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+    let cfg = fixture(root);
+    write(
+        &root.join(".agents/agents/review-bot.md"),
+        "---\nname: reviewer-name\ndescription: Reviews things.\n---\nBody.\n",
+    );
+
+    sync::run(root, &cfg, None, SyncOptions::default()).unwrap();
+
+    let generated = root.join(".opencode/agents/review-bot.md");
+    let edited = fs::read_to_string(&generated)
+        .unwrap()
+        .replace("Body.", "Edited body.");
+    fs::write(&generated, edited).unwrap();
+
+    sync::run(root, &cfg, None, SyncOptions::default()).unwrap();
+
+    let canonical = fs::read_to_string(root.join(".agents/agents/review-bot.md")).unwrap();
+    assert!(
+        canonical.contains("name: reviewer-name"),
+        "canonical name must not be replaced by the file stem: {canonical}"
+    );
+    assert!(canonical.contains("Edited body."));
+}

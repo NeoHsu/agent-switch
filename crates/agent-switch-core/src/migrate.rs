@@ -603,6 +603,11 @@ fn merge_imported_markdown(
     }
 
     let mut fm = imported_doc.frontmatter;
+    // OpenCode file names are the only source of the imported `name`, so an
+    // explicit name in the existing canonical file must win over the stem.
+    let existing_name = (current_tool == Tool::Opencode)
+        .then(|| existing_doc.frontmatter.get("name").cloned())
+        .flatten();
     for (key, existing_value) in existing_doc.frontmatter {
         match fm.get_mut(key.as_str()) {
             Some(imported_value) if key.as_str() == current_tool.name() => {
@@ -613,6 +618,9 @@ fn merge_imported_markdown(
                 fm.insert(key, existing_value);
             }
         }
+    }
+    if let Some(name) = existing_name {
+        fm.insert("name", name);
     }
     let body = if imported_body.is_empty() {
         existing_doc.body
