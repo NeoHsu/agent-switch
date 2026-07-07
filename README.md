@@ -38,8 +38,9 @@ Check for drift in CI without writing files:
 ags sync --check --export-only
 ```
 
-Switch to a selected tool set and remove old managed links or file-copy
-fallbacks for tools that are no longer selected:
+Switch to a selected tool set and remove old managed links, file-copy
+fallbacks, generated outputs, and managed MCP merge content for tools that are
+no longer selected:
 
 ```bash
 ags setup --tool codex --prune
@@ -234,9 +235,18 @@ symlinks:
 ```
 
 Use `ags setup --tool <tool> --prune` when switching tools and you want
-Agent Switch to remove managed links or file-copy fallbacks for tools that are
-no longer selected. Pruning is conservative: unmanaged real files and
-directories are skipped.
+Agent Switch to remove everything it manages for tools that are no longer
+selected: managed links, file-copy fallbacks, generated outputs (for example
+`.github/agents/*.agent.md`), and managed MCP merge content (`opencode.json`'s
+`mcp` object, the `.codex/config.toml` marker block, and
+`.copilot/mcp-config.json`). Pruning is conservative: unmanaged real files,
+modified generated outputs, and directories with user content are skipped and
+reported instead of deleted.
+
+During `ags sync`, managed file copies are only reconciled when they are
+tracked in the sync manifest. A real file sitting at a managed link location
+that Agent Switch never created is left untouched and reported as a warning;
+it is never copied over the canonical source.
 
 ## Cross-Platform Behavior
 

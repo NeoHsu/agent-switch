@@ -232,7 +232,17 @@ setup::run
 - Windows：嘗試 symlink；directory 可 fallback 到 junction；file symlink 失敗時 fallback 到 managed copy。
 - 非 Unix/Windows：fallback 到 copy。
 
-Prune 只刪除可判定為 managed 的 link/copy，避免刪掉使用者手動建立的檔案或目錄。
+Prune 會移除未選工具的所有受管輸出：
+
+- managed link 與 file-copy fallback；
+- generated 輸出（內容必須符合 manifest hash，或可由 canonical source 重新產生比對一致）；
+- MCP merge 內容（`opencode.json` 的 `mcp` key、`.codex/config.toml` 的 marker block、與 canonical 產物一致的 `.copilot/mcp-config.json`）；
+- 清空後留下的工具目錄（只刪空目錄，不會動到使用者內容）。
+
+Prune 只刪除可判定為 managed 的內容：未受管的真實檔案、被修改過的 generated 輸出都會被跳過並回報，不會被刪除。
+
+Setup 在 Windows 建立 file-copy fallback 時，會把 copy 的 hash 記錄到 manifest 的
+`links` 區，後續 `SyncLinksStage` 據此調解內容。
 
 ## Sync Architecture
 
@@ -316,7 +326,7 @@ Stage 行為：
 | `ImportStage` | 偵測 tool-side generated file 被修改，匯入回 canonical source | `.agent/...` |
 | `ExportStage` | 從 canonical markdown 產生工具原生格式 | `.github/...`, `.opencode/...`, `.codex/...` |
 | `RemoveStaleStage` | canonical source 移除後，刪除 manifest 追蹤的 generated output | generated output |
-| `SyncLinksStage` | 同步 Windows/file-copy fallback 的 link target 與 copy | link 或 target |
+| `SyncLinksStage` | 同步 manifest 追蹤的 file-copy fallback；未追蹤的真實檔案只發出 warning，不覆寫 | link 或 target |
 | `MergeStage` | 將 canonical MCP config merge 到工具 config | `opencode.json`, `.codex/config.toml` |
 
 Sync options：

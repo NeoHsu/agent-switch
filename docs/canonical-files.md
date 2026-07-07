@@ -33,8 +33,10 @@ The default `.agent-switch.yaml` maps canonical files to tool-native paths as
 follows. `link/copy` means `ags setup` creates managed links. On Windows,
 directory link failures can fall back to junctions, and file symlink failures
 can fall back to managed plain-file copies. Those file-copy fallbacks are
-reconciled by `ags sync`. `generated` and `merged` paths are written by
-`ags sync`.
+tracked in the sync manifest and reconciled by `ags sync`; a real file at a
+managed link location that Agent Switch never created is reported as a warning
+and never copied over the canonical source. `generated` and `merged` paths are
+written by `ags sync`.
 
 | Canonical source | Claude | Codex | Copilot | OpenCode | Pi | Antigravity |
 | --- | --- | --- | --- | --- | --- | --- |

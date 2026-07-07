@@ -164,8 +164,11 @@ ags setup --tool codex
 ags setup --tool claude,copilot
 ```
 
-Remove managed links or file-copy fallbacks for tools that are no longer
-selected:
+Remove everything Agent Switch manages for tools that are no longer selected —
+managed links, file-copy fallbacks, generated outputs, and managed MCP merge
+content (the `mcp` object in `opencode.json`, the `.codex/config.toml` marker
+block, and `.copilot/mcp-config.json`). Unmanaged real files and modified
+generated outputs are skipped and reported:
 
 ```bash
 ags setup --tool codex --prune
