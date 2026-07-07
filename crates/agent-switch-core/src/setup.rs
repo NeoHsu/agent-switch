@@ -1,17 +1,22 @@
 //! Setup command implementation for native tool links and copy fallbacks.
 
 use std::{
+    collections::BTreeMap,
     fs,
     path::{Component, Path, PathBuf},
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use crate::{
     CommandOutput, ExitCode,
-    config::{self, Config, ManagedLink},
-    fs::{abs, io_error, is_fake_symlink, relative_link, remove_file_or_empty_dir, repo_path},
-    manifest, sync,
+    config::{self, Config, GenerateSpec, ManagedLink},
+    fs::{
+        abs, io_error, is_fake_symlink, read_text, relative_link, remove_file_or_empty_dir,
+        repo_path,
+    },
+    manifest::{self, Manifest},
+    mcp, sync,
     tool::Tool,
 };
 
@@ -31,8 +36,20 @@ pub fn run(
 ) -> Result<CommandOutput> {
     let mut out = CommandOutput::default();
     let mut drift = false;
+    let manifest_path = abs(root, &cfg.manifest);
+    let mut sync_manifest = manifest::load(&manifest_path)
+        .with_context(|| format!("failed to read manifest {}", repo_path(&cfg.manifest)))?;
+    let mut manifest_changed = false;
     if opts.prune {
-        drift |= prune_unselected(root, cfg, tools, opts.check, &mut out)?;
+        drift |= prune_unselected(
+            root,
+            cfg,
+            tools,
+            opts.check,
+            &mut sync_manifest,
+            &mut manifest_changed,
+            &mut out,
+        )?;
     }
     for (link, spec) in &cfg.symlinks {
         if !config::symlink_selected(link, spec, tools) {
@@ -46,14 +63,27 @@ pub fn run(
                 target_config: spec.target_config(),
             },
             opts,
+            &mut sync_manifest,
+            &mut manifest_changed,
             &mut out,
         )?;
     }
 
     if tool_selected(Tool::Claude, tools) {
         for link in config::claude_instruction_links(root)? {
-            drift |= setup_link(root, &link, opts, &mut out)?;
+            drift |= setup_link(
+                root,
+                &link,
+                opts,
+                &mut sync_manifest,
+                &mut manifest_changed,
+                &mut out,
+            )?;
         }
+    }
+
+    if manifest_changed && !opts.check {
+        manifest::save(&manifest_path, &mut sync_manifest)?;
     }
 
     if opts.check && drift {
@@ -73,6 +103,8 @@ fn setup_link(
     root: &Path,
     managed: &ManagedLink,
     opts: SetupOptions,
+    sync_manifest: &mut Manifest,
+    manifest_changed: &mut bool,
     out: &mut CommandOutput,
 ) -> Result<bool> {
     let link_rel = managed.link.as_path();
@@ -81,6 +113,7 @@ fn setup_link(
     let target_abs = abs(root, target_rel_cfg);
     let rel_target = relative_link(&link_abs, &target_abs);
     let rel_target_display = repo_path(&rel_target);
+    let link_key = repo_path(link_rel);
 
     if is_correct_link(&link_abs, &target_abs)? {
         out.push(format!(
@@ -98,6 +131,9 @@ fn setup_link(
         }
         remove_file_or_empty_dir(&link_abs)?;
         let is_symlink = create_link_or_fallback(&link_abs, &target_abs, &rel_target)?;
+        if !is_symlink {
+            record_copy_fallback(sync_manifest, manifest_changed, &link_key, &link_abs)?;
+        }
         out.push(link_message(
             "repaired",
             link_rel,
@@ -107,11 +143,22 @@ fn setup_link(
         return Ok(true);
     }
 
+    if !link_abs.is_symlink() && link_abs.is_file() && sync_manifest.links.contains_key(&link_key)
+    {
+        // A copy fallback this tool created earlier; sync reconciles its
+        // content, so setup only reports it.
+        out.push(format!("ok       {link_key} (managed copy)"));
+        return Ok(false);
+    }
+
     if link_abs.exists() || link_abs.is_symlink() {
         if opts.force && link_abs.is_symlink() {
             if !opts.check {
                 remove_file_or_empty_dir(&link_abs)?;
                 let is_symlink = create_link_or_fallback(&link_abs, &target_abs, &rel_target)?;
+                if !is_symlink {
+                    record_copy_fallback(sync_manifest, manifest_changed, &link_key, &link_abs)?;
+                }
                 out.push(link_message(
                     "repaired",
                     link_rel,
@@ -137,6 +184,9 @@ fn setup_link(
 
     if !opts.check {
         let is_symlink = create_link_or_fallback(&link_abs, &target_abs, &rel_target)?;
+        if !is_symlink {
+            record_copy_fallback(sync_manifest, manifest_changed, &link_key, &link_abs)?;
+        }
         out.push(link_message(
             "created ",
             link_rel,
@@ -158,15 +208,14 @@ fn prune_unselected(
     cfg: &Config,
     tools: Option<&[Tool]>,
     check: bool,
+    sync_manifest: &mut Manifest,
+    manifest_changed: &mut bool,
     out: &mut CommandOutput,
 ) -> Result<bool> {
     let Some(tools) = tools else {
         return Ok(false);
     };
-    let manifest_path = abs(root, &cfg.manifest);
-    let mut sync_manifest = manifest::load(&manifest_path)?;
     let mut changed = false;
-    let mut manifest_changed = false;
 
     for (link, spec) in &cfg.symlinks {
         if config::symlink_selected(link, spec, Some(tools)) {
@@ -174,7 +223,7 @@ fn prune_unselected(
         }
         let (did_change, did_manifest_change) = prune_link(
             root,
-            &mut sync_manifest,
+            sync_manifest,
             &ManagedLink {
                 link: PathBuf::from(link),
                 target: spec.target().to_path_buf(),
@@ -184,23 +233,216 @@ fn prune_unselected(
             out,
         )?;
         changed |= did_change;
-        manifest_changed |= did_manifest_change;
+        *manifest_changed |= did_manifest_change;
     }
 
     if !tool_selected(Tool::Claude, Some(tools)) {
         for link in config::claude_instruction_links(root)? {
             let (did_change, did_manifest_change) =
-                prune_link(root, &mut sync_manifest, &link, check, out)?;
+                prune_link(root, sync_manifest, &link, check, out)?;
             changed |= did_change;
-            manifest_changed |= did_manifest_change;
+            *manifest_changed |= did_manifest_change;
         }
     }
 
-    if manifest_changed && !check {
-        manifest::save(&manifest_path, &mut sync_manifest)?;
+    changed |= prune_unselected_generated(
+        root,
+        cfg,
+        tools,
+        check,
+        sync_manifest,
+        manifest_changed,
+        out,
+    )?;
+    changed |= prune_unselected_merges(root, cfg, tools, check, out)?;
+
+    Ok(changed || *manifest_changed)
+}
+
+fn prune_unselected_generated(
+    root: &Path,
+    cfg: &Config,
+    tools: &[Tool],
+    check: bool,
+    sync_manifest: &mut Manifest,
+    manifest_changed: &mut bool,
+    out: &mut CommandOutput,
+) -> Result<bool> {
+    let unselected: Vec<GenerateSpec> = cfg
+        .generate
+        .values()
+        .filter(|spec| !config::generate_selected(spec, Some(tools)))
+        .cloned()
+        .collect();
+    if unselected.is_empty() {
+        return Ok(false);
     }
 
-    Ok(changed || manifest_changed)
+    // Outputs the unselected specs would generate from the current canonical
+    // sources, plus manifest-tracked outputs whose sources are gone.
+    let mut candidates: BTreeMap<String, Option<sync::PlannedOutput>> = BTreeMap::new();
+    for job in sync::planned_outputs(root, &unselected)? {
+        candidates.insert(repo_path(&job.dest_rel), Some(job));
+    }
+    for key in sync_manifest.generated.keys() {
+        if candidates.contains_key(key) {
+            continue;
+        }
+        let dest_rel = PathBuf::from(key);
+        let owner = cfg
+            .generate
+            .values()
+            .filter(|spec| dest_rel.starts_with(&spec.to))
+            .max_by_key(|spec| spec.to.components().count());
+        if owner.is_some_and(|spec| !config::generate_selected(spec, Some(tools))) {
+            candidates.insert(key.clone(), None);
+        }
+    }
+
+    let mut changed = false;
+    for (key, job) in &candidates {
+        let dest_abs = abs(root, Path::new(key));
+        if !dest_abs.exists() {
+            if sync_manifest.generated.remove(key).is_some() {
+                *manifest_changed = true;
+                changed = true;
+                out.push(format!("removed: {key}"));
+            }
+            continue;
+        }
+        if !is_managed_generated(root, &dest_abs, key, job.as_ref(), sync_manifest) {
+            out.push(format!(
+                "skipped  {key}: not recognized as an unmodified generated file; remove it manually"
+            ));
+            continue;
+        }
+        changed = true;
+        if !check {
+            fs::remove_file(&dest_abs)
+                .map_err(|err| io_error("remove generated file", &dest_abs, err))?;
+        }
+        if sync_manifest.generated.remove(key).is_some() {
+            *manifest_changed = true;
+        }
+        out.push(format!("removed: {key}"));
+    }
+
+    if !check {
+        for spec in &unselected {
+            let to_abs = abs(root, &spec.to);
+            remove_empty_dirs(&to_abs);
+            remove_empty_parent(root, &to_abs);
+        }
+    }
+    Ok(changed)
+}
+
+/// A generated output may be deleted only when it provably came from this
+/// tool: its content matches the manifest hash, or re-exporting its canonical
+/// source reproduces it byte for byte.
+fn is_managed_generated(
+    root: &Path,
+    dest_abs: &Path,
+    dest_key: &str,
+    job: Option<&sync::PlannedOutput>,
+    sync_manifest: &Manifest,
+) -> bool {
+    let Ok(current) = read_text(dest_abs) else {
+        return false;
+    };
+    if sync_manifest
+        .generated
+        .get(dest_key)
+        .is_some_and(|entry| entry.hash == manifest::sha256_text(&current))
+    {
+        return true;
+    }
+    let Some(job) = job else {
+        return false;
+    };
+    let Ok(source) = read_text(&abs(root, &job.src_rel)) else {
+        return false;
+    };
+    job.format
+        .export(&source)
+        .is_ok_and(|generated| generated == current)
+}
+
+fn prune_unselected_merges(
+    root: &Path,
+    cfg: &Config,
+    tools: &[Tool],
+    check: bool,
+    out: &mut CommandOutput,
+) -> Result<bool> {
+    let canonical_mcp = mcp::canonical_mcp_path(root, &cfg.agents_dir);
+    let mut changed = false;
+    for (id, spec) in &cfg.merge {
+        if config::merge_selected(id, spec, Some(tools)) {
+            continue;
+        }
+        let target = abs(root, &spec.to);
+        match mcp::prune(spec.format, &canonical_mcp, &target, check)? {
+            mcp::PruneOutcome::Removed => {
+                changed = true;
+                if !check {
+                    remove_empty_parent(root, &target);
+                }
+                out.push(format!("removed: {}", repo_path(&spec.to)));
+            }
+            mcp::PruneOutcome::Cleaned => {
+                changed = true;
+                out.push(format!(
+                    "cleaned  {}: removed agent-switch managed MCP servers",
+                    repo_path(&spec.to)
+                ));
+            }
+            mcp::PruneOutcome::Unmanaged => {
+                out.push(format!(
+                    "skipped  {}: not recognized as agent-switch output; remove it manually",
+                    repo_path(&spec.to)
+                ));
+            }
+            mcp::PruneOutcome::Absent => {}
+        }
+    }
+    Ok(changed)
+}
+
+fn record_copy_fallback(
+    sync_manifest: &mut Manifest,
+    manifest_changed: &mut bool,
+    link_key: &str,
+    link_abs: &Path,
+) -> Result<()> {
+    let bytes = fs::read(link_abs).map_err(|err| io_error("read managed copy", link_abs, err))?;
+    sync_manifest
+        .links
+        .insert(link_key.to_string(), manifest::sha256_bytes(&bytes));
+    *manifest_changed = true;
+    Ok(())
+}
+
+/// Best-effort removal of a now-empty tool directory; `remove_dir` refuses
+/// non-empty directories, so user content is never at risk.
+fn remove_empty_parent(root: &Path, path: &Path) {
+    if let Some(parent) = path.parent() {
+        if parent != root {
+            let _ = fs::remove_dir(parent);
+        }
+    }
+}
+
+fn remove_empty_dirs(dir: &Path) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            remove_empty_dirs(&entry.path());
+        }
+    }
+    let _ = fs::remove_dir(dir);
 }
 
 fn prune_link(
@@ -226,6 +468,7 @@ fn prune_link(
         changed = true;
         if !check {
             remove_file_or_empty_dir(&link_abs)?;
+            remove_empty_parent(root, &link_abs);
         }
         out.push(format!("removed: {}", link_key));
     } else if had_manifest_link && !link_abs.exists() {

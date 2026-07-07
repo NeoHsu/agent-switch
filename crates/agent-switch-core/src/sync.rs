@@ -25,6 +25,7 @@ use event::SyncEvent;
 
 pub use event::SyncEventKind;
 use plan::SyncPlan;
+pub(crate) use plan::{Job as PlannedOutput, planned_outputs};
 use report::SyncReport;
 use stage::SyncStage;
 

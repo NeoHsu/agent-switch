@@ -14,10 +14,10 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
-pub(super) struct Job {
-    pub(super) format: crate::tool::Format,
-    pub(super) src_rel: PathBuf,
-    pub(super) dest_rel: PathBuf,
+pub(crate) struct Job {
+    pub(crate) format: crate::tool::Format,
+    pub(crate) src_rel: PathBuf,
+    pub(crate) dest_rel: PathBuf,
 }
 
 #[derive(Debug)]
@@ -56,6 +56,12 @@ fn selected_specs(cfg: &Config, tools: Option<&[Tool]>) -> Vec<GenerateSpec> {
         .filter(|spec| config::generate_selected(spec, tools))
         .cloned()
         .collect()
+}
+
+/// Compute the generated outputs the given specs would produce. Shared with
+/// `setup --prune`, which needs the output list for unselected specs.
+pub(crate) fn planned_outputs(root: &Path, specs: &[GenerateSpec]) -> Result<Vec<Job>> {
+    build_jobs(root, specs)
 }
 
 fn build_jobs(root: &Path, specs: &[GenerateSpec]) -> Result<Vec<Job>> {

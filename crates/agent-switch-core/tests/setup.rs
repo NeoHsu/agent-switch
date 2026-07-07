@@ -610,3 +610,133 @@ fn setup_check_prune_reports_drift_without_removing() {
     assert_eq!(out.exit(), ExitCode::Drift);
     assert_managed_link(&root.join(".pi/mcp.json"));
 }
+
+fn write_reviewer_agent(root: &Path) {
+    write(
+        &root.join(".agents/agents/reviewer.md"),
+        "---\nname: reviewer\ndescription: Reviews code.\n---\nReview the diff.\n",
+    );
+}
+
+#[test]
+fn setup_prune_removes_generated_outputs_and_merge_targets_for_unselected_tools() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+    let cfg = fixture(root);
+    write_reviewer_agent(root);
+
+    setup::run(root, &cfg, None, SetupOptions::default()).unwrap();
+    assert!(root.join(".github/agents/reviewer.agent.md").exists());
+    assert!(root.join(".opencode/agents/reviewer.md").exists());
+    assert!(root.join("opencode.json").exists());
+    assert!(root.join(".copilot/mcp-config.json").exists());
+    assert!(root.join(".codex/agents/reviewer.toml").exists());
+
+    let out = setup::run(
+        root,
+        &cfg,
+        Some(&[Tool::Codex]),
+        SetupOptions {
+            prune: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert!(
+        out.lines
+            .iter()
+            .any(|line| line == "removed: .github/agents/reviewer.agent.md")
+    );
+    assert_absent(&root.join(".github/agents/reviewer.agent.md"));
+    assert_absent(&root.join(".github/agents"));
+    assert_absent(&root.join(".opencode/agents/reviewer.md"));
+    assert_absent(&root.join("opencode.json"));
+    assert_absent(&root.join(".copilot/mcp-config.json"));
+    assert!(root.join(".codex/agents/reviewer.toml").exists());
+    assert!(root.join(".codex/config.toml").exists());
+
+    let tracked = manifest::load(&root.join(".agents/.sync-manifest.json")).unwrap();
+    assert!(
+        !tracked
+            .generated
+            .contains_key(".github/agents/reviewer.agent.md")
+    );
+    assert!(
+        tracked
+            .generated
+            .contains_key(".codex/agents/reviewer.toml")
+    );
+}
+
+#[test]
+fn setup_prune_skips_modified_generated_outputs() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+    let cfg = fixture(root);
+    write_reviewer_agent(root);
+
+    setup::run(root, &cfg, None, SetupOptions::default()).unwrap();
+    let generated = root.join(".github/agents/reviewer.agent.md");
+    let mut edited = fs::read_to_string(&generated).unwrap();
+    edited.push_str("\nLocal tweak.\n");
+    fs::write(&generated, edited).unwrap();
+
+    let out = setup::run(
+        root,
+        &cfg,
+        Some(&[Tool::Codex]),
+        SetupOptions {
+            prune: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert!(
+        out.lines
+            .iter()
+            .any(|line| { line.starts_with("skipped  .github/agents/reviewer.agent.md:") })
+    );
+    assert!(generated.exists());
+    assert_absent(&root.join(".opencode/agents/reviewer.md"));
+}
+
+#[test]
+fn setup_prune_cleans_codex_marker_block_preserving_user_content() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+    let cfg = fixture(root);
+    write_reviewer_agent(root);
+    write(
+        &root.join(".agents/mcp.json"),
+        "{\n  \"mcpServers\": {\n    \"demo\": {\"command\": \"npx\"}\n  }\n}\n",
+    );
+    write(&root.join(".codex/config.toml"), "theme = \"dark\"\n");
+
+    setup::run(root, &cfg, None, SetupOptions::default()).unwrap();
+    let merged = fs::read_to_string(root.join(".codex/config.toml")).unwrap();
+    assert!(merged.contains("# >>> agent-switch:mcp >>>"));
+    assert!(merged.contains("theme = \"dark\""));
+
+    let out = setup::run(
+        root,
+        &cfg,
+        Some(&[Tool::Claude]),
+        SetupOptions {
+            prune: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert!(
+        out.lines
+            .iter()
+            .any(|line| { line.starts_with("cleaned  .codex/config.toml:") })
+    );
+    let cleaned = fs::read_to_string(root.join(".codex/config.toml")).unwrap();
+    assert!(!cleaned.contains("# >>> agent-switch:mcp >>>"));
+    assert!(cleaned.contains("theme = \"dark\""));
+    assert_absent(&root.join(".codex/agents/reviewer.toml"));
+}
