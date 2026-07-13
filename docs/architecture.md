@@ -364,7 +364,7 @@ Manifest 檔案：`.agents/.sync-manifest.json`
   "meta": {
     "version": 1,
     "tool": "agent-switch",
-    "tool_version": "0.1.0"
+    "tool_version": "0.2.0"
   }
 }
 ```
