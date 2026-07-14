@@ -99,7 +99,8 @@ fn full_sync_generates_outputs_and_check_passes() {
     assert!(root.join(".codex/agents/reviewer.toml").exists());
     assert!(root.join("opencode.json").exists());
     assert!(root.join(".codex/config.toml").exists());
-    assert!(root.join(".copilot/mcp-config.json").exists());
+    assert!(root.join(".agents/mcp_config.json").exists());
+    assert!(!root.join(".copilot/mcp-config.json").exists());
     assert!(root.join(".agents/.sync-manifest.json").exists());
 
     let second = sync::run(root, &cfg, None, SyncOptions::default()).unwrap();
@@ -116,6 +117,71 @@ fn full_sync_generates_outputs_and_check_passes() {
     )
     .unwrap();
     assert_eq!(check.exit(), ExitCode::Ok);
+}
+
+#[test]
+fn opencode_mcp_merge_preserves_settings_without_inventing_instructions() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+    let cfg = fixture(root);
+    write(
+        root.join("opencode.json").as_path(),
+        "{\"theme\":\"system\"}\n",
+    );
+
+    sync::run(root, &cfg, Some(&[Tool::Opencode]), SyncOptions::default()).unwrap();
+
+    let output: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(root.join("opencode.json")).unwrap()).unwrap();
+    assert_eq!(output["theme"], "system");
+    assert!(output.get("mcp").is_some());
+    assert!(output.get("instructions").is_none());
+}
+
+#[test]
+fn antigravity_mcp_merge_uses_native_server_url_and_preserves_other_settings() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+    let cfg = fixture(root);
+    write(
+        &root.join(".agents/mcp.json"),
+        r#"{
+  "mcpServers": {
+    "remote": {
+      "url": "https://example.com/mcp",
+      "headers": {"Authorization": "Bearer token"},
+      "disabled_tools": ["dangerous"]
+    }
+  }
+}
+"#,
+    );
+    write(
+        &root.join(".agents/mcp_config.json"),
+        "{\"$schema\":\"https://example.com/schema.json\"}\n",
+    );
+
+    sync::run(
+        root,
+        &cfg,
+        Some(&[Tool::Antigravity]),
+        SyncOptions::default(),
+    )
+    .unwrap();
+
+    let output: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(root.join(".agents/mcp_config.json")).unwrap())
+            .unwrap();
+    assert_eq!(output["$schema"], "https://example.com/schema.json");
+    assert_eq!(
+        output["mcpServers"]["remote"]["serverUrl"],
+        "https://example.com/mcp"
+    );
+    assert_eq!(
+        output["mcpServers"]["remote"]["disabledTools"][0],
+        "dangerous"
+    );
+    assert!(output["mcpServers"]["remote"].get("url").is_none());
 }
 
 #[test]
@@ -362,6 +428,7 @@ fn tool_filter_only_generates_selected_tool_outputs() {
 
     assert!(root.join(".codex/agents/reviewer.toml").exists());
     assert!(root.join(".codex/config.toml").exists());
+    assert!(!root.join(".agents/mcp_config.json").exists());
     assert!(!root.join(".copilot/mcp-config.json").exists());
     assert!(!root.join(".github/agents/reviewer.agent.md").exists());
     assert!(!root.join(".opencode/agents/reviewer.md").exists());
@@ -391,6 +458,9 @@ name: reviewer
 description: Canonical side description.
 tools: Read
 model: sonnet
+custom_flag: keep-me
+future_tool:
+  setting: keep-too
 opencode:
   model: kept
 codex:
@@ -410,6 +480,9 @@ Canonical body changed.
     assert!(canonical.contains("opencode:"));
     assert!(canonical.contains("codex:"));
     assert!(canonical.contains("tools: Read"));
+    assert!(canonical.contains("custom_flag: keep-me"));
+    assert!(canonical.contains("future_tool:"));
+    assert!(canonical.contains("setting: keep-too"));
     assert!(canonical.contains("infer: true"));
 }
 
@@ -531,7 +604,7 @@ fn sync_recreates_missing_manifest_tracked_copy() {
     let mut tracked = manifest::Manifest::default();
     tracked
         .links
-        .insert(".pi/mcp.json".into(), manifest::sha256_text(&canonical));
+        .insert(".mcp.json".into(), manifest::sha256_text(&canonical));
     manifest::save(&root.join(".agents/.sync-manifest.json"), &mut tracked).unwrap();
 
     let out = sync::run(root, &cfg, None, SyncOptions::default()).unwrap();
@@ -539,10 +612,10 @@ fn sync_recreates_missing_manifest_tracked_copy() {
     assert!(
         out.lines
             .iter()
-            .any(|line| line == "copied: .agents/mcp.json -> .pi/mcp.json")
+            .any(|line| line == "copied: .agents/mcp.json -> .mcp.json")
     );
     assert_eq!(
-        fs::read_to_string(root.join(".pi/mcp.json")).unwrap(),
+        fs::read_to_string(root.join(".mcp.json")).unwrap(),
         canonical
     );
 }

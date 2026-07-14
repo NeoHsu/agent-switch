@@ -185,52 +185,59 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_crlf_frontmatter() {
-        let doc = parse("---\r\nname: a\r\n---\r\nbody\r\n").unwrap();
+    fn parses_crlf_frontmatter() -> Result<()> {
+        let doc = parse("---\r\nname: a\r\n---\r\nbody\r\n")?;
         assert_eq!(str_value(&doc.frontmatter, "name").as_deref(), Some("a"));
         assert_eq!(doc.body, "body\n");
+        Ok(())
     }
 
     #[test]
-    fn missing_closing_fence_is_treated_as_body() {
+    fn missing_closing_fence_is_treated_as_body() -> Result<()> {
         let input = "---\nname: a\nbody without closing fence\n";
-        let doc = parse(input).unwrap();
+        let doc = parse(input)?;
         assert!(doc.frontmatter.is_empty());
         assert_eq!(doc.body, input);
+        Ok(())
     }
 
     #[test]
-    fn empty_frontmatter_block_parses() {
-        let doc = parse("---\n---\nbody\n").unwrap();
+    fn empty_frontmatter_block_parses() -> Result<()> {
+        let doc = parse("---\n---\nbody\n")?;
         assert!(doc.frontmatter.is_empty());
         assert_eq!(doc.body, "body\n");
+        Ok(())
     }
 
     #[test]
-    fn closing_fence_at_end_of_input() {
-        let doc = parse("---\nname: a\n---").unwrap();
+    fn closing_fence_at_end_of_input() -> Result<()> {
+        let doc = parse("---\nname: a\n---")?;
         assert_eq!(str_value(&doc.frontmatter, "name").as_deref(), Some("a"));
         assert_eq!(doc.body, "");
+        Ok(())
     }
 
     #[test]
-    fn fence_must_be_a_complete_line() {
-        let doc = parse("---\nname: a\n---\ndashes\n----\nmore\n").unwrap();
+    fn fence_must_be_a_complete_line() -> Result<()> {
+        let doc = parse("---\nname: a\n---\ndashes\n----\nmore\n")?;
         assert_eq!(str_value(&doc.frontmatter, "name").as_deref(), Some("a"));
         assert_eq!(doc.body, "dashes\n----\nmore\n");
+        Ok(())
     }
 
     #[test]
-    fn no_frontmatter_passthrough() {
-        let doc = parse("plain body\n").unwrap();
+    fn no_frontmatter_passthrough() -> Result<()> {
+        let doc = parse("plain body\n")?;
         assert!(doc.frontmatter.is_empty());
         assert_eq!(doc.body, "plain body\n");
+        Ok(())
     }
 
     #[test]
-    fn render_round_trips() {
-        let doc = parse("---\nname: a\ndescription: b\n---\nbody\n").unwrap();
-        let rendered = render(doc.frontmatter, &doc.body).unwrap();
+    fn render_round_trips() -> Result<()> {
+        let doc = parse("---\nname: a\ndescription: b\n---\nbody\n")?;
+        let rendered = render(doc.frontmatter, &doc.body)?;
         assert_eq!(rendered, "---\nname: a\ndescription: b\n---\nbody\n");
+        Ok(())
     }
 }

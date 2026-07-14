@@ -1,7 +1,7 @@
 //! Setup command implementation for native tool links and copy fallbacks.
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs,
     path::{Component, Path, PathBuf},
 };
@@ -17,7 +17,7 @@ use crate::{
     },
     manifest::{self, Manifest},
     mcp, sync,
-    tool::Tool,
+    tool::{MergeFormat, Tool},
 };
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -86,15 +86,28 @@ pub fn run(
         manifest::save(&manifest_path, &mut sync_manifest)?;
     }
 
-    if opts.check && drift {
-        out.exit = Some(ExitCode::Drift);
-        return Ok(out);
+    if !opts.no_sync {
+        let sync_out = sync::run(
+            root,
+            cfg,
+            tools,
+            sync::SyncOptions {
+                check: opts.check,
+                ..sync::SyncOptions::default()
+            },
+        )?;
+        let sync_exit = sync_out.exit();
+        if sync_exit == ExitCode::Drift {
+            drift = true;
+        }
+        out.lines.extend(sync_out.lines);
+        if sync_exit != ExitCode::Ok {
+            out.exit = Some(sync_exit);
+        }
     }
 
-    if !opts.no_sync && !opts.check {
-        let sync_out = sync::run(root, cfg, tools, sync::SyncOptions::default())?;
-        out.lines.extend(sync_out.lines);
-        out.exit = sync_out.exit;
+    if opts.check && drift {
+        out.exit = Some(ExitCode::Drift);
     }
     Ok(out)
 }
@@ -114,6 +127,16 @@ fn setup_link(
     let rel_target = relative_link(&link_abs, &target_abs);
     let rel_target_display = repo_path(&rel_target);
     let link_key = repo_path(link_rel);
+
+    if !target_abs.exists() {
+        out.push(format!(
+            "skipped  {}: canonical target is missing: {}",
+            repo_path(link_rel),
+            repo_path(target_rel_cfg)
+        ));
+        out.exit = Some(ExitCode::Drift);
+        return Ok(true);
+    }
 
     if is_correct_link(&link_abs, &target_abs)? {
         out.push(format!(
@@ -150,6 +173,20 @@ fn setup_link(
         return Ok(false);
     }
 
+    if !link_abs.is_symlink()
+        && link_abs.is_file()
+        && target_abs.is_file()
+        && fs::read(&link_abs)? == fs::read(&target_abs)?
+    {
+        // A pre-existing file with canonical-identical content can be safely
+        // adopted as a managed copy without replacing it or risking data loss.
+        if !opts.check {
+            record_copy_fallback(sync_manifest, manifest_changed, &link_key, &link_abs)?;
+        }
+        out.push(format!("adopted  {link_key} (managed copy)"));
+        return Ok(true);
+    }
+
     if link_abs.exists() || link_abs.is_symlink() {
         if opts.force && link_abs.is_symlink() {
             if !opts.check {
@@ -178,7 +215,8 @@ fn setup_link(
             repo_path(link_rel),
             repo_path(target_rel_cfg)
         ));
-        return Ok(opts.check);
+        out.exit = Some(ExitCode::Drift);
+        return Ok(true);
     }
 
     if !opts.check {
@@ -235,13 +273,27 @@ fn prune_unselected(
         *manifest_changed |= did_manifest_change;
     }
 
+    let nested_claude_links = config::claude_instruction_links(root)?;
     if !tool_selected(Tool::Claude, Some(tools)) {
-        for link in config::claude_instruction_links(root)? {
+        for link in &nested_claude_links {
             let (did_change, did_manifest_change) =
-                prune_link(root, sync_manifest, &link, check, out)?;
+                prune_link(root, sync_manifest, link, check, out)?;
             changed |= did_change;
             *manifest_changed |= did_manifest_change;
         }
+    }
+
+    let mut configured_links = cfg.symlinks.keys().cloned().collect::<BTreeSet<_>>();
+    configured_links.extend(nested_claude_links.iter().map(|link| repo_path(&link.link)));
+    let stale_links = sync_manifest.links.clone();
+    for (link, tracked_hash) in stale_links {
+        if configured_links.contains(&link) {
+            continue;
+        }
+        let (did_change, did_manifest_change) =
+            prune_stale_copy_fallback(root, sync_manifest, &link, &tracked_hash, check, out)?;
+        changed |= did_change;
+        *manifest_changed |= did_manifest_change;
     }
 
     changed |= prune_unselected_generated(
@@ -313,6 +365,7 @@ fn prune_unselected_generated(
             out.push(format!(
                 "skipped  {key}: not recognized as an unmodified generated file; remove it manually"
             ));
+            out.exit = Some(ExitCode::Drift);
             continue;
         }
         changed = true;
@@ -401,6 +454,40 @@ fn prune_unselected_merges(
                     "skipped  {}: not recognized as agent-switch output; remove it manually",
                     repo_path(&spec.to)
                 ));
+                out.exit = Some(ExitCode::Drift);
+            }
+            mcp::PruneOutcome::Absent => {}
+        }
+    }
+
+    let legacy_copilot = Path::new(".copilot/mcp-config.json");
+    let legacy_is_configured = cfg
+        .merge
+        .values()
+        .any(|spec| repo_path(&spec.to) == repo_path(legacy_copilot));
+    if !legacy_is_configured {
+        let target = abs(root, legacy_copilot);
+        match mcp::prune(MergeFormat::Copilot, &canonical_mcp, &target, check)? {
+            mcp::PruneOutcome::Removed => {
+                changed = true;
+                if !check {
+                    remove_empty_parent(root, &target);
+                }
+                out.push(format!("removed: {}", repo_path(legacy_copilot)));
+            }
+            mcp::PruneOutcome::Cleaned => {
+                changed = true;
+                out.push(format!(
+                    "cleaned  {}: removed agent-switch managed MCP servers",
+                    repo_path(legacy_copilot)
+                ));
+            }
+            mcp::PruneOutcome::Unmanaged => {
+                out.push(format!(
+                    "skipped  {}: not recognized as agent-switch output; remove it manually",
+                    repo_path(legacy_copilot)
+                ));
+                out.exit = Some(ExitCode::Drift);
             }
             mcp::PruneOutcome::Absent => {}
         }
@@ -444,6 +531,57 @@ fn remove_empty_dirs(dir: &Path) {
     let _ = fs::remove_dir(dir);
 }
 
+fn prune_stale_copy_fallback(
+    root: &Path,
+    sync_manifest: &mut manifest::Manifest,
+    link_key: &str,
+    tracked_hash: &str,
+    check: bool,
+    out: &mut CommandOutput,
+) -> Result<(bool, bool)> {
+    let link_rel = Path::new(link_key);
+    let safe_path = !link_key.is_empty()
+        && !link_key.contains('\\')
+        && !link_rel.is_absolute()
+        && link_rel
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)));
+    if !safe_path {
+        out.push(format!(
+            "skipped  {link_key}: unsafe path in manifest; run `ags sync --reset-manifest`"
+        ));
+        out.exit = Some(ExitCode::Drift);
+        return Ok((false, false));
+    }
+    let link_abs = abs(root, link_rel);
+    if !link_abs.exists() && !link_abs.is_symlink() {
+        let manifest_changed = sync_manifest.links.remove(link_key).is_some();
+        out.push(format!("removed: {link_key}"));
+        return Ok((true, manifest_changed));
+    }
+    if link_abs.is_file() && !link_abs.is_symlink() {
+        let current_hash = manifest::sha256_bytes(&fs::read(&link_abs)?);
+        if current_hash == tracked_hash {
+            if !check {
+                remove_file_or_empty_dir(&link_abs)?;
+                remove_empty_parent(root, &link_abs);
+            }
+            let manifest_changed = sync_manifest.links.remove(link_key).is_some();
+            out.push(format!("removed: {link_key}"));
+            return Ok((true, manifest_changed));
+        }
+        out.push(format!(
+            "skipped  {link_key}: managed copy was modified; preserve or merge it manually"
+        ));
+    } else {
+        out.push(format!(
+            "skipped  {link_key}: stale manifest entry is not a managed file copy; remove it manually"
+        ));
+    }
+    out.exit = Some(ExitCode::Drift);
+    Ok((false, false))
+}
+
 fn prune_link(
     root: &Path,
     sync_manifest: &mut manifest::Manifest,
@@ -457,12 +595,20 @@ fn prune_link(
     let target_abs = abs(root, target_rel);
     let rel_target = relative_link(&link_abs, &target_abs);
     let link_key = repo_path(link_rel);
-    let had_manifest_link = sync_manifest.links.contains_key(&link_key);
+    let tracked_hash = sync_manifest.links.get(&link_key).cloned();
+    let managed_copy_matches = if let Some(tracked_hash) = &tracked_hash {
+        link_abs.is_file()
+            && !link_abs.is_symlink()
+            && manifest::sha256_bytes(&fs::read(&link_abs)?) == *tracked_hash
+    } else {
+        false
+    };
 
     let is_managed = is_correct_link(&link_abs, &target_abs)?
         || is_fake_symlink(&link_abs, &rel_target, &managed.target_config)
-        || (had_manifest_link && link_abs.is_file());
+        || managed_copy_matches;
     let mut changed = false;
+    let manifest_changed;
     if is_managed {
         changed = true;
         if !check {
@@ -470,17 +616,28 @@ fn prune_link(
             remove_empty_parent(root, &link_abs);
         }
         out.push(format!("removed: {}", link_key));
-    } else if had_manifest_link && !link_abs.exists() {
+        manifest_changed = sync_manifest.links.remove(&link_key).is_some();
+    } else if tracked_hash.is_some() && !link_abs.exists() {
         changed = true;
         out.push(format!("removed: {}", link_key));
-    } else if link_abs.exists() || link_abs.is_symlink() {
-        out.push(format!(
-            "skipped  {}: existing real file or directory; remove it manually if it is no longer needed",
-            link_key
-        ));
+        manifest_changed = sync_manifest.links.remove(&link_key).is_some();
+    } else {
+        if tracked_hash.is_some() && link_abs.is_file() && !link_abs.is_symlink() {
+            out.push(format!(
+                "skipped  {link_key}: managed copy was modified; preserve or merge it manually"
+            ));
+        } else if link_abs.exists() || link_abs.is_symlink() {
+            out.push(format!(
+                "skipped  {}: existing real file or directory; remove it manually if it is no longer needed",
+                link_key
+            ));
+        }
+        if link_abs.exists() || link_abs.is_symlink() {
+            out.exit = Some(ExitCode::Drift);
+        }
+        manifest_changed = false;
     }
 
-    let manifest_changed = sync_manifest.links.remove(&link_key).is_some();
     Ok((changed, manifest_changed))
 }
 
@@ -488,7 +645,7 @@ fn tool_selected(tool: Tool, tools: Option<&[Tool]>) -> bool {
     tools.is_none_or(|tools| tools.contains(&tool))
 }
 
-fn is_correct_link(link: &Path, target: &Path) -> Result<bool> {
+pub(crate) fn is_correct_link(link: &Path, target: &Path) -> Result<bool> {
     if !link.is_symlink() {
         return Ok(false);
     }
@@ -628,17 +785,18 @@ fn link_message(prefix: &str, link: &Path, rel_target: &str, is_symlink: bool) -
 mod windows_tests {
     use std::{fs, io, path::Path};
 
+    use anyhow::Result;
     use tempfile::tempdir;
 
     use super::create_link_or_fallback_windows;
 
     #[test]
-    fn file_symlink_failure_falls_back_to_copy() {
-        let temp = tempdir().unwrap();
+    fn file_symlink_failure_falls_back_to_copy() -> Result<()> {
+        let temp = tempdir()?;
         let root = temp.path();
         let target = root.join("target.txt");
         let link = root.join("link.txt");
-        fs::write(&target, "content\n").unwrap();
+        fs::write(&target, "content\n")?;
 
         let created_symlink = create_link_or_fallback_windows(
             &link,
@@ -647,20 +805,20 @@ mod windows_tests {
             |_, _| unreachable!("directory symlink should not be used for files"),
             |_, _| Err(io::Error::new(io::ErrorKind::PermissionDenied, "denied")),
             |_, _| unreachable!("junction should not be used for files"),
-        )
-        .unwrap();
+        )?;
 
         assert!(!created_symlink);
-        assert_eq!(fs::read_to_string(link).unwrap(), "content\n");
+        assert_eq!(fs::read_to_string(link)?, "content\n");
+        Ok(())
     }
 
     #[test]
-    fn directory_symlink_failure_uses_junction() {
-        let temp = tempdir().unwrap();
+    fn directory_symlink_failure_uses_junction() -> Result<()> {
+        let temp = tempdir()?;
         let root = temp.path();
         let target = root.join("target");
         let link = root.join("link");
-        fs::create_dir(&target).unwrap();
+        fs::create_dir(&target)?;
 
         let created_symlink = create_link_or_fallback_windows(
             &link,
@@ -669,13 +827,13 @@ mod windows_tests {
             |_, _| Err(io::Error::new(io::ErrorKind::PermissionDenied, "denied")),
             |_, _| unreachable!("file symlink should not be used for directories"),
             |link, _| {
-                fs::create_dir(link).unwrap();
+                fs::create_dir(link)?;
                 Ok(true)
             },
-        )
-        .unwrap();
+        )?;
 
         assert!(created_symlink);
         assert!(link.exists());
+        Ok(())
     }
 }

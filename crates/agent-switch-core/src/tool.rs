@@ -108,6 +108,7 @@ pub enum MergeFormat {
     Opencode,
     Codex,
     Copilot,
+    Antigravity,
 }
 
 impl MergeFormat {
@@ -116,6 +117,7 @@ impl MergeFormat {
             MergeFormat::Opencode => "opencode",
             MergeFormat::Codex => "codex",
             MergeFormat::Copilot => "copilot",
+            MergeFormat::Antigravity => "antigravity",
         }
     }
 
@@ -124,6 +126,7 @@ impl MergeFormat {
             MergeFormat::Opencode => Tool::Opencode,
             MergeFormat::Codex => Tool::Codex,
             MergeFormat::Copilot => Tool::Copilot,
+            MergeFormat::Antigravity => Tool::Antigravity,
         }
     }
 }
@@ -134,15 +137,13 @@ impl fmt::Display for MergeFormat {
     }
 }
 
-// Symlink ownership rules. Exact matches win over prefixes; prefixes are
-// checked in order, so `.claude/skills` must stay ahead of `.claude/`.
+// Symlink ownership rules. Exact matches win over prefixes.
 const LINK_EXACT_RULES: &[(&str, &[Tool])] = &[
-    (".mcp.json", &[Tool::Claude]),
+    (".mcp.json", &[Tool::Claude, Tool::Copilot]),
     ("CLAUDE.md", &[Tool::Claude]),
 ];
 
 const LINK_PREFIX_RULES: &[(&str, &[Tool])] = &[
-    (".claude/skills", &[Tool::Claude, Tool::Pi]),
     (".claude/", &[Tool::Claude]),
     (".copilot/", &[Tool::Copilot]),
     (".opencode/", &[Tool::Opencode]),
@@ -150,7 +151,7 @@ const LINK_PREFIX_RULES: &[(&str, &[Tool])] = &[
     (".agent/", &[Tool::Antigravity]),
 ];
 
-const SKILLS_TARGET_TOOLS: &[Tool] = &[Tool::Claude, Tool::Pi];
+const SKILLS_TARGET_TOOLS: &[Tool] = &[Tool::Claude];
 
 pub fn tools_for_link(link: &str, target: &str) -> &'static [Tool] {
     for (path, tools) in LINK_EXACT_RULES {

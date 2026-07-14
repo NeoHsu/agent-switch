@@ -20,6 +20,7 @@ use crate::{
 pub const CONFIG_FILE: &str = ".agent-switch.yaml";
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     pub version: u32,
     #[serde(default = "default_agents_dir")]
@@ -63,6 +64,7 @@ pub enum GeneratedTracking {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct GenerateSpec {
     pub from: PathBuf,
     pub to: PathBuf,
@@ -91,6 +93,7 @@ pub enum SymlinkSpec {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct SymlinkDetail {
     pub to: PathBuf,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -121,6 +124,7 @@ impl SymlinkSpec {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct MergeSpec {
     pub to: PathBuf,
     pub format: MergeFormat,
@@ -157,11 +161,9 @@ const DEFAULT_SYMLINKS: &[(&str, &str)] = &[
     (".claude/commands", "commands"),
     (".claude/rules", "rules"),
     (".opencode/commands", "commands"),
-    (".agent/rules", "rules"),
+    (".pi/prompts", "commands"),
     (".agent/workflows", "commands"),
-    (".agent/skills", "skills"),
     (".mcp.json", "mcp.json"),
-    (".pi/mcp.json", "mcp.json"),
     ("CLAUDE.md", "AGENTS.md"),
 ];
 
@@ -212,9 +214,9 @@ const DEFAULT_MERGE: &[(&str, &str, MergeFormat)] = &[
     ("opencode-config", "opencode.json", MergeFormat::Opencode),
     ("codex-config", ".codex/config.toml", MergeFormat::Codex),
     (
-        "copilot-mcp-config",
-        ".copilot/mcp-config.json",
-        MergeFormat::Copilot,
+        "antigravity-mcp-config",
+        ".agents/mcp_config.json",
+        MergeFormat::Antigravity,
     ),
 ];
 
@@ -279,8 +281,8 @@ impl Config {
             ("codex-agents", GeneratedTracking::Ignored),
             ("opencode-agents", GeneratedTracking::Ignored),
             ("opencode-config", GeneratedTracking::Ignored),
-            ("copilot-mcp-config", GeneratedTracking::Ignored),
             ("codex-config", GeneratedTracking::Ignored),
+            ("antigravity-mcp-config", GeneratedTracking::Ignored),
         ]
         .into_iter()
         .map(|(id, tracking)| (id.to_string(), tracking))

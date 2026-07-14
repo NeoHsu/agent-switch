@@ -27,6 +27,7 @@ pub fn merge(
         MergeFormat::Opencode => merge_opencode(canonical_mcp, target, check),
         MergeFormat::Codex => merge_codex(canonical_mcp, target, check),
         MergeFormat::Copilot => merge_copilot(canonical_mcp, target, check),
+        MergeFormat::Antigravity => merge_antigravity(canonical_mcp, target, check),
     }
 }
 
@@ -47,7 +48,6 @@ fn merge_opencode(canonical_mcp: &Path, target: &Path, check: bool) -> Result<bo
         ))
     })?;
     obj.insert("mcp".into(), convert_opencode_mcp(&canonical));
-    obj.entry("instructions").or_insert(json!([]));
     let text = format!("{}\n", serde_json::to_string_pretty(&target_json)?);
     if target.exists() && read_existing_text(target)? == text {
         return Ok(false);
@@ -93,6 +93,40 @@ fn merge_copilot(canonical_mcp: &Path, target: &Path, check: bool) -> Result<boo
     Ok(true)
 }
 
+fn merge_antigravity(canonical_mcp: &Path, target: &Path, check: bool) -> Result<bool> {
+    if !canonical_mcp.exists() {
+        return Ok(false);
+    }
+    let canonical: Value = serde_json::from_str(&read_text(canonical_mcp)?)?;
+    let converted = convert_antigravity_mcp(&canonical);
+    let mut target_json = if target.exists() {
+        serde_json::from_str::<Value>(&read_text(target)?)?
+    } else {
+        json!({})
+    };
+    let obj = target_json.as_object_mut().ok_or_else(|| {
+        Error::Config(format!(
+            "merge target is not a JSON object: {}",
+            target.display()
+        ))
+    })?;
+    obj.insert(
+        "mcpServers".into(),
+        converted
+            .get("mcpServers")
+            .cloned()
+            .unwrap_or_else(|| json!({})),
+    );
+    let text = format!("{}\n", serde_json::to_string_pretty(&target_json)?);
+    if target.exists() && read_existing_text(target)? == text {
+        return Ok(false);
+    }
+    if !check {
+        write_if_changed(target, &text)?;
+    }
+    Ok(true)
+}
+
 /// Result of pruning agent-switch managed MCP content from a merge target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PruneOutcome {
@@ -118,10 +152,14 @@ pub fn prune(
     if !target.exists() {
         return Ok(PruneOutcome::Absent);
     }
+    if !target.is_file() {
+        return Ok(PruneOutcome::Unmanaged);
+    }
     match format {
         MergeFormat::Opencode => prune_opencode(target, check),
         MergeFormat::Codex => prune_codex(target, check),
         MergeFormat::Copilot => prune_copilot(canonical_mcp, target, check),
+        MergeFormat::Antigravity => prune_antigravity(target, check),
     }
 }
 
@@ -141,6 +179,29 @@ fn prune_opencode(target: &Path, check: bool) -> Result<PruneOutcome> {
             .and_then(Value::as_array)
             .is_some_and(Vec::is_empty);
     if obj.is_empty() || only_empty_instructions {
+        if !check {
+            fs::remove_file(target).map_err(|err| io_error("remove merge target", target, err))?;
+        }
+        return Ok(PruneOutcome::Removed);
+    }
+    if !check {
+        let text = format!("{}\n", serde_json::to_string_pretty(&existing)?);
+        write_if_changed(target, &text)?;
+    }
+    Ok(PruneOutcome::Cleaned)
+}
+
+fn prune_antigravity(target: &Path, check: bool) -> Result<PruneOutcome> {
+    let Ok(mut existing) = serde_json::from_str::<Value>(&read_text(target)?) else {
+        return Ok(PruneOutcome::Unmanaged);
+    };
+    let Some(obj) = existing.as_object_mut() else {
+        return Ok(PruneOutcome::Unmanaged);
+    };
+    if obj.remove("mcpServers").is_none() {
+        return Ok(PruneOutcome::Absent);
+    }
+    if obj.is_empty() {
         if !check {
             fs::remove_file(target).map_err(|err| io_error("remove merge target", target, err))?;
         }
@@ -216,35 +277,44 @@ fn convert_opencode_mcp(canonical: &Value) -> Value {
     };
     let mut out = serde_json::Map::new();
     for (name, server) in servers {
-        if server.get("type").and_then(Value::as_str) == Some("http") || server.get("url").is_some()
-        {
-            out.insert(
-                name.clone(),
-                json!({
-                    "type": "remote",
-                    "url": server.get("url").cloned().unwrap_or(Value::String(String::new())),
-                    "enabled": true,
-                    "headers": server.get("headers").cloned().unwrap_or(json!({}))
-                }),
-            );
+        let Some(server_obj) = server.as_object() else {
+            continue;
+        };
+        let remote_url = server_obj
+            .get("url")
+            .or_else(|| server_obj.get("serverUrl"))
+            .cloned();
+        let is_remote = remote_url.is_some()
+            || matches!(str_field(server, "type"), Some("http" | "sse" | "remote"));
+        let mut cfg = serde_json::Map::new();
+        if is_remote {
+            cfg.insert("type".into(), json!("remote"));
+            if let Some(url) = remote_url {
+                cfg.insert("url".into(), url);
+            }
+            copy_json_key(server_obj, &mut cfg, "headers");
+            copy_json_key(server_obj, &mut cfg, "oauth");
         } else {
-            let mut cmd = vec![];
-            if let Some(command) = server.get("command").and_then(Value::as_str) {
-                cmd.push(Value::String(command.into()));
+            let mut command = Vec::new();
+            if let Some(executable) = server_obj.get("command").and_then(Value::as_str) {
+                command.push(Value::String(executable.into()));
             }
-            if let Some(args) = server.get("args").and_then(Value::as_array) {
-                cmd.extend(args.iter().cloned());
+            if let Some(args) = server_obj.get("args").and_then(Value::as_array) {
+                command.extend(args.iter().cloned());
             }
-            out.insert(
-                name.clone(),
-                json!({
-                    "type": "local",
-                    "command": cmd,
-                    "enabled": true,
-                    "environment": server.get("env").cloned().unwrap_or(json!({}))
-                }),
-            );
+            cfg.insert("type".into(), json!("local"));
+            cfg.insert("command".into(), Value::Array(command));
+            if let Some(environment) = server_obj.get("env").cloned() {
+                cfg.insert("environment".into(), environment);
+            }
+            copy_json_key(server_obj, &mut cfg, "cwd");
         }
+        cfg.insert(
+            "enabled".into(),
+            server_obj.get("enabled").cloned().unwrap_or(json!(true)),
+        );
+        copy_json_key(server_obj, &mut cfg, "timeout");
+        out.insert(name.clone(), Value::Object(cfg));
     }
     Value::Object(out)
 }
@@ -282,6 +352,52 @@ fn convert_copilot_mcp(canonical: &Value) -> Value {
             );
         }
         cfg.insert("tools".into(), tool_list(server));
+        out.insert(name.clone(), Value::Object(cfg));
+    }
+    json!({ "mcpServers": out })
+}
+
+fn convert_antigravity_mcp(canonical: &Value) -> Value {
+    let Some(servers) = canonical.get("mcpServers").and_then(Value::as_object) else {
+        return json!({ "mcpServers": {} });
+    };
+    let mut out = serde_json::Map::new();
+    for (name, server) in servers {
+        let Some(server_obj) = server.as_object() else {
+            continue;
+        };
+        let mut cfg = serde_json::Map::new();
+        let remote_url = server_obj
+            .get("serverUrl")
+            .or_else(|| server_obj.get("url"))
+            .or_else(|| server_obj.get("httpUrl"))
+            .cloned();
+        let is_remote = remote_url.is_some()
+            || matches!(str_field(server, "type"), Some("http" | "sse" | "remote"));
+        if is_remote {
+            if let Some(url) = remote_url {
+                cfg.insert("serverUrl".into(), url);
+            }
+            copy_json_key(server_obj, &mut cfg, "headers");
+        } else {
+            copy_json_key(server_obj, &mut cfg, "command");
+            copy_json_key(server_obj, &mut cfg, "args");
+            copy_json_key(server_obj, &mut cfg, "env");
+            copy_json_key(server_obj, &mut cfg, "cwd");
+        }
+        for key in ["authProviderType", "oauth", "disabled", "disabledTools"] {
+            copy_json_key(server_obj, &mut cfg, key);
+        }
+        if !cfg.contains_key("disabledTools") {
+            if let Some(disabled_tools) = server_obj.get("disabled_tools").cloned() {
+                cfg.insert("disabledTools".into(), disabled_tools);
+            }
+        }
+        if !cfg.contains_key("disabled")
+            && server_obj.get("enabled").and_then(Value::as_bool) == Some(false)
+        {
+            cfg.insert("disabled".into(), json!(true));
+        }
         out.insert(name.clone(), Value::Object(cfg));
     }
     json!({ "mcpServers": out })
@@ -471,6 +587,7 @@ pub fn import_native(format: MergeFormat, target: &Path) -> Result<Option<Value>
         MergeFormat::Opencode => import_opencode_mcp(&text)?,
         MergeFormat::Codex => import_codex_mcp(&text)?,
         MergeFormat::Copilot => import_copilot_mcp(&text)?,
+        MergeFormat::Antigravity => import_antigravity_mcp(&text)?,
     };
     Ok(Some(canonical))
 }
@@ -486,6 +603,43 @@ fn import_copilot_mcp(source: &str) -> Result<Value> {
         cfg.remove("tools");
         if cfg.get("type").and_then(Value::as_str) == Some("local") {
             cfg.remove("type");
+        }
+        out.insert(name.clone(), Value::Object(cfg));
+    }
+    Ok(json!({ "mcpServers": out }))
+}
+
+fn import_antigravity_mcp(source: &str) -> Result<Value> {
+    let native: Value = serde_json::from_str(source)?;
+    let Some(servers) = native.get("mcpServers").and_then(Value::as_object) else {
+        return Ok(json!({ "mcpServers": {} }));
+    };
+    let mut out = serde_json::Map::new();
+    for (name, server) in servers {
+        let Some(server_obj) = server.as_object() else {
+            continue;
+        };
+        let mut cfg = serde_json::Map::new();
+        if let Some(url) = server_obj
+            .get("serverUrl")
+            .or_else(|| server_obj.get("url"))
+            .cloned()
+        {
+            cfg.insert("url".into(), url);
+        } else {
+            copy_json_key(server_obj, &mut cfg, "command");
+            copy_json_key(server_obj, &mut cfg, "args");
+            copy_json_key(server_obj, &mut cfg, "env");
+            copy_json_key(server_obj, &mut cfg, "cwd");
+        }
+        for key in [
+            "headers",
+            "authProviderType",
+            "oauth",
+            "disabled",
+            "disabledTools",
+        ] {
+            copy_json_key(server_obj, &mut cfg, key);
         }
         out.insert(name.clone(), Value::Object(cfg));
     }
@@ -512,6 +666,7 @@ fn import_opencode_mcp(source: &str) -> Result<Value> {
             if let Some(headers) = server_obj.get("headers").cloned() {
                 cfg.insert("headers".into(), headers);
             }
+            copy_json_key(server_obj, &mut cfg, "oauth");
             cfg.insert("type".into(), json!("http"));
         } else {
             import_opencode_command(server_obj.get("command"), &mut cfg);
@@ -522,8 +677,10 @@ fn import_opencode_mcp(source: &str) -> Result<Value> {
             {
                 cfg.insert("env".into(), env);
             }
+            copy_json_key(server_obj, &mut cfg, "cwd");
         }
         copy_json_key(server_obj, &mut cfg, "enabled");
+        copy_json_key(server_obj, &mut cfg, "timeout");
         copy_json_key(server_obj, &mut cfg, "required");
         copy_json_key(server_obj, &mut cfg, "startup_timeout_sec");
         copy_json_key(server_obj, &mut cfg, "tool_timeout_sec");
@@ -759,6 +916,85 @@ mod tests {
         assert!(rendered.contains("disabled_tools = [\"write\"]"));
         assert!(rendered.contains("startup_timeout_sec = 20"));
         assert!(rendered.contains("enabled = true"));
+    }
+
+    #[test]
+    fn opencode_mcp_conversion_preserves_current_native_options() -> Result<()> {
+        let canonical = json!({
+            "mcpServers": {
+                "local": {
+                    "command": "node",
+                    "args": ["server.js"],
+                    "env": {"KEY": "value"},
+                    "cwd": "tools",
+                    "enabled": false,
+                    "timeout": 9000
+                },
+                "remote": {
+                    "url": "https://example.com/mcp",
+                    "headers": {"Authorization": "Bearer token"},
+                    "oauth": {"clientId": "client"},
+                    "enabled": false,
+                    "timeout": 7000
+                }
+            }
+        });
+
+        let converted = convert_opencode_mcp(&canonical);
+        assert_eq!(converted["local"]["enabled"], false);
+        assert_eq!(converted["local"]["cwd"], "tools");
+        assert_eq!(converted["local"]["timeout"], 9000);
+        assert_eq!(converted["remote"]["oauth"]["clientId"], "client");
+        assert_eq!(converted["remote"]["enabled"], false);
+
+        let native = json!({ "mcp": converted });
+        let imported = import_opencode_mcp(&serde_json::to_string(&native)?)?;
+        assert_eq!(imported["mcpServers"]["local"]["enabled"], false);
+        assert_eq!(imported["mcpServers"]["local"]["cwd"], "tools");
+        assert_eq!(imported["mcpServers"]["local"]["timeout"], 9000);
+        assert_eq!(
+            imported["mcpServers"]["remote"]["oauth"]["clientId"],
+            "client"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn antigravity_mcp_conversion_normalizes_remote_urls_and_round_trips() -> Result<()> {
+        let canonical = json!({
+            "mcpServers": {
+                "local": {
+                    "command": "node",
+                    "args": ["server.js"],
+                    "env": {"KEY": "value"}
+                },
+                "remote": {
+                    "url": "https://example.com/mcp",
+                    "headers": {"Authorization": "Bearer token"},
+                    "disabled_tools": ["dangerous"]
+                }
+            }
+        });
+
+        let converted = convert_antigravity_mcp(&canonical);
+        assert_eq!(
+            converted["mcpServers"]["remote"]["serverUrl"],
+            "https://example.com/mcp"
+        );
+        assert!(converted["mcpServers"]["remote"].get("url").is_none());
+        assert_eq!(
+            converted["mcpServers"]["remote"]["disabledTools"],
+            json!(["dangerous"])
+        );
+        assert_eq!(converted["mcpServers"]["local"]["command"], "node");
+
+        let imported = import_antigravity_mcp(&serde_json::to_string(&converted)?)?;
+        assert_eq!(
+            imported["mcpServers"]["remote"]["url"],
+            "https://example.com/mcp"
+        );
+        assert!(imported["mcpServers"]["remote"].get("serverUrl").is_none());
+        Ok(())
     }
 
     #[test]

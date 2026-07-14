@@ -9,7 +9,7 @@ use std::{
 use anyhow::Result;
 
 use crate::{
-    CommandOutput,
+    CommandOutput, Error,
     config::{self, CONFIG_FILE, Config, GeneratedTracking, write_config},
     fs::{io_error, write_if_changed},
     mcp,
@@ -18,7 +18,12 @@ use crate::{
 
 pub fn run(root: &Path, tools: Option<&str>, force: bool) -> Result<CommandOutput> {
     let selected_tools = tools.map(config::parse_tools).transpose()?;
-    let cfg = filtered_default_config(selected_tools.as_deref());
+    let config_path = root.join(CONFIG_FILE);
+    let cfg = if config_path.exists() && !force {
+        config::load_config(root, None)?.0
+    } else {
+        filtered_default_config(selected_tools.as_deref())
+    };
     let agents_dir = root.join(&cfg.agents_dir);
     let mut out = CommandOutput::default();
 
@@ -59,7 +64,7 @@ pub fn run(root: &Path, tools: Option<&str>, force: bool) -> Result<CommandOutpu
     )?;
     write_sample(
         &agents_dir.join("skills/example-skill/SKILL.md"),
-        "# Example Skill\n\nUse this as a placeholder skill.\n",
+        "---\nname: example-skill\ndescription: Example placeholder skill.\n---\n# Example Skill\n\nUse this as a placeholder skill.\n",
         force,
         &format!(
             "{}/skills/example-skill/SKILL.md",
@@ -68,7 +73,7 @@ pub fn run(root: &Path, tools: Option<&str>, force: bool) -> Result<CommandOutpu
         &mut out,
     )?;
 
-    if write_config(&root.join(CONFIG_FILE), &cfg, force)? {
+    if write_config(&config_path, &cfg, force)? {
         out.push(format!("created  {CONFIG_FILE}"));
     } else {
         out.push(format!("skipped  {CONFIG_FILE}: already exists"));
@@ -123,60 +128,104 @@ pub fn update_gitignore(root: &Path, out: &mut CommandOutput) -> Result<()> {
     update_gitignore_for_config(root, &Config::default(), out)
 }
 
-fn update_gitignore_for_config(root: &Path, cfg: &Config, out: &mut CommandOutput) -> Result<()> {
+const GITIGNORE_START: &str = "# >>> agent-switch >>>";
+const GITIGNORE_END: &str = "# <<< agent-switch <<<";
+
+pub fn update_gitignore_for_config(
+    root: &Path,
+    cfg: &Config,
+    out: &mut CommandOutput,
+) -> Result<()> {
     let path = root.join(".gitignore");
     let current = match fs::read_to_string(&path) {
         Ok(current) => current,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(err) => return Err(io_error("read existing file", &path, err)),
     };
-    if current.contains("# >>> agent-switch >>>") {
+    let block = gitignore_block(cfg);
+    let next = if let Some(start) = current.find(GITIGNORE_START) {
+        let search_from = start + GITIGNORE_START.len();
+        let end_rel = current[search_from..].find(GITIGNORE_END).ok_or_else(|| {
+            Error::Config(format!(
+                "{} contains an agent-switch block without a closing marker",
+                path.display()
+            ))
+        })?;
+        let marker_end = search_from + end_rel + GITIGNORE_END.len();
+        let suffix_start = if current[marker_end..].starts_with("\r\n") {
+            marker_end + 2
+        } else if current[marker_end..].starts_with('\n') {
+            marker_end + 1
+        } else {
+            marker_end
+        };
+        let suffix = &current[suffix_start..];
+        let mut next = format!("{}{}\n", &current[..start], block);
+        if !suffix.is_empty() {
+            if !suffix.starts_with('\n') && !suffix.starts_with("\r\n") {
+                next.push('\n');
+            }
+            next.push_str(suffix);
+        }
+        next
+    } else {
+        let mut next = current.trim_end().to_string();
+        if !next.is_empty() {
+            next.push_str("\n\n");
+        }
+        next.push_str(&block);
+        next.push('\n');
+        next
+    };
+
+    if write_if_changed(&path, &next)? {
+        out.push("updated  .gitignore");
+    } else {
         out.push("ok       .gitignore");
-        return Ok(());
     }
-    let mut next = current.trim_end().to_string();
-    if !next.is_empty() {
-        next.push_str("\n\n");
-    }
-    next.push_str(&gitignore_block(cfg));
-    next.push('\n');
-    write_if_changed(&path, &next)?;
-    out.push("updated  .gitignore");
     Ok(())
 }
 
 fn gitignore_block(cfg: &Config) -> String {
     let mut lines = vec![
-        "# >>> agent-switch >>>".to_string(),
+        GITIGNORE_START.to_string(),
         "# Agent Switch runtime state".to_string(),
         crate::fs::repo_path(&cfg.manifest),
-        String::new(),
-        "# Tool-specific links/copies and generated adapters".to_string(),
-        ".claude/".to_string(),
-        ".copilot/".to_string(),
-        ".pi/".to_string(),
-        ".codex/".to_string(),
-        ".opencode/".to_string(),
     ];
 
-    for (id, spec) in &cfg.generate {
-        if cfg.generated_tracking.get(id) == Some(&GeneratedTracking::Tracked) {
-            continue;
-        }
-        lines.push(crate::fs::repo_path(&spec.to) + "/");
+    let native_paths = cfg
+        .symlinks
+        .keys()
+        .filter(|link| !Path::new(link).starts_with(&cfg.agents_dir))
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    if !native_paths.is_empty() {
+        lines.push(String::new());
+        lines.push("# Managed native links/copies".to_string());
+        lines.extend(native_paths);
     }
 
-    if cfg.generated_tracking.get("opencode-config") != Some(&GeneratedTracking::Tracked) {
+    let mut ignored_outputs = BTreeSet::new();
+    for (id, spec) in &cfg.generate {
+        if cfg.generated_tracking.get(id) != Some(&GeneratedTracking::Tracked) {
+            ignored_outputs.insert(format!("{}/", crate::fs::repo_path(&spec.to)));
+        }
+    }
+    for (id, spec) in &cfg.merge {
+        if cfg.generated_tracking.get(id) != Some(&GeneratedTracking::Tracked) {
+            ignored_outputs.insert(crate::fs::repo_path(&spec.to));
+        }
+    }
+    if !ignored_outputs.is_empty() {
         lines.push(String::new());
         lines.push(
-            "# Agent Switch-managed merge target; remove this line if your team wants to commit OpenCode config"
+            "# Ignored generated/merged outputs; set generated_tracking to tracked to commit"
                 .to_string(),
         );
-        lines.push("opencode.json".to_string());
+        lines.extend(ignored_outputs);
     }
 
-    lines.push("# <<< agent-switch <<<".to_string());
-    lines.push(String::new());
+    lines.push(GITIGNORE_END.to_string());
     lines.join("\n")
 }
 

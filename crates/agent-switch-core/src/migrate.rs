@@ -12,7 +12,7 @@ use walkdir::WalkDir;
 
 use crate::{
     CommandOutput, Error, ExitCode,
-    config::{self, Config, GenerateSpec, write_config},
+    config::{self, Config, GenerateSpec, SymlinkDetail, SymlinkSpec, write_config},
     formats,
     fs::{atomic_write, io_error, is_fake_symlink, read_text, repo_path, write_if_changed},
     init, mcp,
@@ -38,6 +38,12 @@ struct ImportOutcome {
     skipped: bool,
 }
 
+const LEGACY_IMPORT_LINKS: &[(&str, &str, Tool)] = &[
+    (".pi/skills", "skills", Tool::Pi),
+    (".agent/rules", "rules", Tool::Antigravity),
+    (".agent/skills", "skills", Tool::Antigravity),
+];
+
 pub fn run(
     root: &Path,
     explicit_config: Option<&Path>,
@@ -57,9 +63,10 @@ pub fn run(
     drift |= generated_outcome.changed || generated_outcome.skipped;
     skipped |= generated_outcome.skipped;
     let mut native_paths_to_backup = BTreeSet::new();
+    let import_cfg = with_legacy_import_links(&cfg);
     let symlink_outcome = import_symlink_sources(
         root,
-        &cfg,
+        &import_cfg,
         tools,
         opts,
         &mut native_paths_to_backup,
@@ -67,16 +74,27 @@ pub fn run(
     )?;
     drift |= symlink_outcome.changed || symlink_outcome.skipped;
     skipped |= symlink_outcome.skipped;
+    queue_managed_legacy_links_for_backup(root, &cfg, tools, &mut native_paths_to_backup);
     let merge_outcome = import_merge_sources(root, &cfg, tools, opts, &mut out)?;
     drift |= merge_outcome.changed || merge_outcome.skipped;
     skipped |= merge_outcome.skipped;
+    let legacy_copilot_outcome = import_legacy_copilot_mcp(
+        root,
+        &cfg,
+        tools,
+        opts,
+        &mut native_paths_to_backup,
+        &mut out,
+    )?;
+    drift |= legacy_copilot_outcome.changed || legacy_copilot_outcome.skipped;
+    skipped |= legacy_copilot_outcome.skipped;
 
     if !opts.keep_native {
         drift |= backup_native_paths(root, &native_paths_to_backup, opts.check, &mut out)?;
     }
 
     if !opts.check {
-        init::update_gitignore(root, &mut out)?;
+        init::update_gitignore_for_config(root, &cfg, &mut out)?;
     }
 
     if !opts.no_setup && !opts.keep_native {
@@ -143,6 +161,44 @@ fn filtered_default_config(tools: Option<&[Tool]>) -> Config {
             .retain(|id, spec| config::merge_selected(id, spec, Some(tools)));
     }
     cfg
+}
+
+fn with_legacy_import_links(cfg: &Config) -> Config {
+    let mut import_cfg = cfg.clone();
+    for &(link, target, tool) in LEGACY_IMPORT_LINKS {
+        let target = import_cfg.agents_dir.join(target);
+        import_cfg.symlinks.entry(link.into()).or_insert_with(|| {
+            SymlinkSpec::Detailed(SymlinkDetail {
+                to: target,
+                tool: Some(tool),
+                tools: None,
+            })
+        });
+    }
+    import_cfg
+}
+
+fn queue_managed_legacy_links_for_backup(
+    root: &Path,
+    cfg: &Config,
+    tools: Option<&[Tool]>,
+    native_paths_to_backup: &mut BTreeSet<PathBuf>,
+) {
+    for &(link, target, tool) in LEGACY_IMPORT_LINKS {
+        if cfg.symlinks.contains_key(link)
+            || tools.is_some_and(|selected| !selected.contains(&tool))
+        {
+            continue;
+        }
+        let source_rel = Path::new(link);
+        let target_rel = cfg.agents_dir.join(target);
+        let source_abs = root.join(source_rel);
+        let target_abs = root.join(&target_rel);
+        let target_config = repo_path(&target_rel);
+        if is_managed_native_source(&source_abs, &target_abs, &target_rel, &target_config) {
+            native_paths_to_backup.insert(source_rel.to_path_buf());
+        }
+    }
 }
 
 fn ensure_canonical_dirs(
@@ -358,6 +414,41 @@ fn import_merge_sources(
                 .with_context(|| format!("failed to merge MCP servers for {id}"))?;
         outcome.changed |= source_outcome.changed;
         outcome.skipped |= source_outcome.skipped;
+    }
+    Ok(outcome)
+}
+
+fn import_legacy_copilot_mcp(
+    root: &Path,
+    cfg: &Config,
+    tools: Option<&[Tool]>,
+    opts: MigrateOptions,
+    native_paths_to_backup: &mut BTreeSet<PathBuf>,
+    out: &mut CommandOutput,
+) -> Result<ImportOutcome> {
+    let source_rel = Path::new(".copilot/mcp-config.json");
+    let selected = tools.is_none_or(|tools| tools.contains(&Tool::Copilot));
+    let configured = cfg
+        .merge
+        .values()
+        .any(|spec| same_repo_path(&spec.to, source_rel));
+    if !selected || configured {
+        return Ok(ImportOutcome::default());
+    }
+    let source_abs = root.join(source_rel);
+    let Some(imported) = mcp::import_native(crate::tool::MergeFormat::Copilot, &source_abs)
+        .with_context(|| {
+            format!(
+                "failed to import legacy Copilot MCP config from {}",
+                repo_path(source_rel)
+            )
+        })?
+    else {
+        return Ok(ImportOutcome::default());
+    };
+    let outcome = merge_mcp_value(root, cfg, source_rel, imported, opts.check, opts.force, out)?;
+    if !outcome.skipped {
+        native_paths_to_backup.insert(source_rel.to_path_buf());
     }
     Ok(outcome)
 }
@@ -680,7 +771,9 @@ fn merge_mcp_value(
     let canonical_servers = canonical
         .get_mut("mcpServers")
         .and_then(Value::as_object_mut)
-        .expect("canonical mcpServers was normalized");
+        .ok_or_else(|| {
+            Error::Config("canonical MCP config field `mcpServers` must be an object".into())
+        })?;
     let mut changed = false;
     let mut skipped = false;
     for (name, server) in imported_servers {
@@ -810,7 +903,11 @@ fn is_starter_file(path: &Path, bytes: &[u8]) -> bool {
             text == "---\npaths:\n- \"**/*.rs\"\n---\nUse clear, direct Rust code.\n"
         }
         ".agents/skills/example-skill/SKILL.md" | ".agent/skills/example-skill/SKILL.md" => {
-            text == "# Example Skill\n\nUse this as a placeholder skill.\n"
+            matches!(
+                text,
+                "# Example Skill\n\nUse this as a placeholder skill.\n"
+                    | "---\nname: example-skill\ndescription: Example placeholder skill.\n---\n# Example Skill\n\nUse this as a placeholder skill.\n"
+            )
         }
         _ => false,
     }
@@ -885,6 +982,19 @@ fn ensure_trailing_newline(mut text: String) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recognizes_old_and_current_example_skill_starters() {
+        let path = Path::new(".agents/skills/example-skill/SKILL.md");
+        assert!(is_starter_file(
+            path,
+            b"# Example Skill\n\nUse this as a placeholder skill.\n"
+        ));
+        assert!(is_starter_file(
+            path,
+            b"---\nname: example-skill\ndescription: Example placeholder skill.\n---\n# Example Skill\n\nUse this as a placeholder skill.\n"
+        ));
+    }
 
     #[test]
     fn generated_canonical_path_removes_compound_suffix() {

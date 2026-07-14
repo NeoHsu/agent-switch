@@ -1,13 +1,12 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
-use strum::IntoEnumIterator;
 
 use crate::{
     formats,
     fs::{read_text, repo_path, write_if_changed},
     manifest::{self, GeneratedEntry},
-    tool::{Format, Tool},
+    tool::Format,
 };
 
 use crate::sync::SyncOptions;
@@ -111,12 +110,11 @@ fn preserve_existing_canonical_fields(
     let current_tool = format.tool().name();
     let existing_name = existing_doc.frontmatter.get("name").cloned();
     for (key, value) in existing_doc.frontmatter {
-        let preserve = key.as_str().is_some_and(|key_str| {
-            let is_other_tool_ns =
-                Tool::iter().any(|tool| tool.name() == key_str) && key_str != current_tool;
-            matches!(key_str, "tools" | "model") || is_other_tool_ns
-        });
-        if preserve && !imported_doc.frontmatter.contains_key(&key) {
+        // A generated adapter only owns its own namespace plus the shared
+        // fields it imported. Preserve every other canonical field, including
+        // custom metadata and namespaces unknown to this version of ags.
+        let is_current_tool_namespace = key.as_str() == Some(current_tool);
+        if !is_current_tool_namespace && !imported_doc.frontmatter.contains_key(&key) {
             imported_doc.frontmatter.insert(key, value);
         }
     }
