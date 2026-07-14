@@ -11,6 +11,17 @@ For CLI workflows and option semantics, see [`docs/cli-usage.md`](docs/cli-usage
 For canonical `.agents/` file conventions and frontmatter examples, see
 [`docs/canonical-files.md`](docs/canonical-files.md).
 
+## Install
+
+Download a prebuilt archive for Linux, macOS, or Windows from the
+[latest GitHub release](https://github.com/NeoHsu/agent-switch/releases/latest),
+or build from source with Rust 1.85 or newer:
+
+```bash
+cargo build --release -p agent-switch-cli
+install -m 0755 target/release/ags ~/.local/bin/ags
+```
+
 ## Quickstart
 
 For most existing repositories, let coding-agent tools create their native files
@@ -98,11 +109,32 @@ Default integrations by tool:
 | Tool | Native paths managed by default | Canonical source | Integration mode |
 | --- | --- | --- | --- |
 | Claude | `.claude/agents`, `.claude/commands`, `.claude/rules`, `.claude/skills`, `CLAUDE.md`, `.mcp.json` | `.agents/agents`, `.agents/commands`, `.agents/rules`, `.agents/skills`, `AGENTS.md`, `.agents/mcp.json` | symlink/copy; no generated adapter |
-| Codex | `.codex/agents/*.toml`, `.codex/config.toml` | `.agents/agents/*.md`, `.agents/mcp.json` | generated TOML agents; MCP marker-block merge |
-| Copilot | `.github/agents/*.agent.md`, `.github/prompts/*.prompt.md`, `.github/instructions/**/*.instructions.md`, `.copilot/mcp-config.json` | `.agents/agents`, `.agents/commands`, `.agents/rules`, `.agents/mcp.json` | generated Markdown; MCP config conversion |
-| OpenCode | `.opencode/commands`, `.opencode/agents/*.md`, `opencode.json` | `.agents/commands`, `.agents/agents`, `.agents/mcp.json` | commands symlink/copy; generated agents; MCP merge |
-| Pi | `.claude/skills`, `.pi/mcp.json` | `.agents/skills`, `.agents/mcp.json` | Claude-compatible skills and MCP symlink/copy |
-| Antigravity | `.agent/rules`, `.agent/workflows`, `.agent/skills` | `.agents/rules`, `.agents/commands`, `.agents/skills` | symlink/copy; no generated adapter |
+| Codex | native `AGENTS.md` and `.agents/skills`; `.codex/agents/*.toml`, `.codex/config.toml` | `AGENTS.md`, `.agents/skills`, `.agents/agents/*.md`, `.agents/mcp.json` | direct context/skills discovery; generated TOML agents; MCP marker-block merge |
+| Copilot | native `AGENTS.md` and `.agents/skills`; `.github/agents/*.agent.md`, `.github/prompts/*.prompt.md`, `.github/instructions/**/*.instructions.md`, `.mcp.json` | `AGENTS.md`, `.agents/skills`, `.agents/agents`, `.agents/commands`, `.agents/rules`, `.agents/mcp.json` | direct context/skills discovery; generated Markdown; shared MCP symlink/copy |
+| OpenCode | native `AGENTS.md` and `.agents/skills`; `.opencode/commands`, `.opencode/agents/*.md`, `opencode.json` | `AGENTS.md`, `.agents/skills`, `.agents/commands`, `.agents/agents`, `.agents/mcp.json` | direct context/skills discovery; commands link; generated agents; MCP merge |
+| Pi | native `AGENTS.md` and `.agents/skills`; `.pi/prompts` | `AGENTS.md`, `.agents/skills`, `.agents/commands` | direct context/skills discovery; prompt-template link; no built-in subagents or MCP |
+| Antigravity | native `AGENTS.md`, `.agents/rules`, `.agents/skills`, and `.agents/mcp_config.json`; `.agent/workflows` compatibility path | `AGENTS.md`, `.agents/rules`, `.agents/skills`, `.agents/mcp.json`, `.agents/commands` | direct context/rules/skills discovery; native MCP conversion; workflow link |
+
+Pi reads root/ancestor `AGENTS.md` and `.agents/skills` directly. Agent Switch
+only exposes shared commands at Pi's native `.pi/prompts` path. Official Pi
+does not ship built-in subagents, a path-scoped rules directory, or
+MCP, so those are not fabricated by the default integration. Pi-only resources
+such as extensions, themes, project settings, `SYSTEM.md`, and
+`APPEND_SYSTEM.md` remain project-owned and trackable under `.pi/`.
+
+Existing `.agent-switch.yaml` files are never silently rewritten on upgrade. To
+adopt these Pi defaults, keep/add `.pi/prompts`, remove `.pi/skills` and the
+legacy `.pi/mcp.json` mapping, then run `ags --tool pi migrate`; Pi discovers
+canonical skills directly. For current Antigravity, remove `.agent/rules` and
+`.agent/skills` before `ags --tool antigravity migrate`; `.agents/rules` and
+`.agents/skills` are now its preferred paths, and MCP is rendered to
+`.agents/mcp_config.json`. Use `ags init --force --tools antigravity` (or another
+explicit tool list) only when replacing the entire existing config is
+intentional. Existing Copilot configs should likewise add
+`.mcp.json: .agents/mcp.json` and remove the legacy `copilot-mcp-config` merge
+job; `ags --tool copilot migrate` imports and
+backs up the obsolete `.copilot/mcp-config.json`, while Copilot discovers the
+shared workspace file directly.
 
 For a path-by-path canonical-to-native matrix, see
 [`docs/canonical-files.md`](docs/canonical-files.md#default-integration-map).
@@ -138,6 +170,7 @@ generated_tracking:
   claude: ignored
   codex-agents: ignored
   opencode-agents: ignored
+  antigravity-mcp-config: ignored
 
 symlinks:
   .claude/skills: .agents/skills
@@ -145,11 +178,9 @@ symlinks:
   .claude/commands: .agents/commands
   .claude/rules: .agents/rules
   .opencode/commands: .agents/commands
-  .agent/rules: .agents/rules
+  .pi/prompts: .agents/commands
   .agent/workflows: .agents/commands
-  .agent/skills: .agents/skills
   .mcp.json: .agents/mcp.json
-  .pi/mcp.json: .agents/mcp.json
   CLAUDE.md: AGENTS.md
 
 generate:
@@ -187,9 +218,9 @@ merge:
   codex-config:
     to: .codex/config.toml
     format: codex
-  copilot-mcp-config:
-    to: .copilot/mcp-config.json
-    format: copilot
+  antigravity-mcp-config:
+    to: .agents/mcp_config.json
+    format: antigravity
 ```
 
 Run `ags migrate` when a repository already has native agent files, or when your
@@ -212,10 +243,14 @@ native adapters without importing native edits back into the canonical tree.
 Use `ags sync --import-only` when you explicitly want to pull managed generated
 edits back into canonical files.
 
-`generated_tracking` controls `.gitignore` generation by mapping id. Copilot
-generated files default to `tracked` because GitHub-hosted Copilot reads
-`.github/agents`, `.github/prompts`, and `.github/instructions` from the
-repository.
+`generated_tracking` controls `.gitignore` generation by mapping id. Ignore
+rules are emitted for exact managed paths rather than whole tool directories,
+so changing a mapping to `tracked` makes that output committable without also
+unignoring unrelated adapters. Copilot generated files default to `tracked`
+because GitHub-hosted Copilot reads `.github/agents`, `.github/prompts`, and
+`.github/instructions` from the repository. Re-run `ags init` (without
+`--force`) or `ags migrate` after editing tracking settings to refresh the
+managed `.gitignore` block from the active config.
 
 Config paths are validated before any setup or sync work runs:
 
@@ -223,6 +258,7 @@ Config paths are validated before any setup or sync work runs:
 - paths must use forward slashes for portability;
 - absolute paths and `.` / `..` path components are rejected;
 - `generate` output directories must be unique;
+- unknown or misspelled config fields are rejected;
 - use either `tool` or `tools` on a mapping, not both;
 - `tools` lists must be non-empty and contain no duplicates.
 
@@ -242,9 +278,12 @@ Agent Switch to remove everything it manages for tools that are no longer
 selected: managed links, file-copy fallbacks, generated outputs (for example
 `.github/agents/*.agent.md`), and managed MCP merge content (`opencode.json`'s
 `mcp` object, the `.codex/config.toml` marker block, and
-`.copilot/mcp-config.json`). Pruning is conservative: unmanaged real files,
-modified generated outputs, and directories with user content are skipped and
-reported instead of deleted.
+`.agents/mcp_config.json`'s `mcpServers` object). Prune also removes an obsolete
+`.copilot/mcp-config.json` only when it exactly matches generated legacy output.
+Pruning is conservative: unmanaged real files, modified managed-copy
+fallbacks, modified generated outputs, and directories with user content are
+skipped and reported instead of deleted. An unresolved setup or prune operation
+exits with the drift code instead of reporting success.
 
 During `ags sync`, managed file copies are only reconciled when they are
 tracked in the sync manifest. A real file sitting at a managed link location
@@ -325,14 +364,15 @@ so archive names match the binaries they contain.
 | Code | Meaning |
 | --- | --- |
 | 0 | command succeeded |
-| 1 | drift detected in `--check` mode |
+| 1 | drift detected by `--check`/`doctor`, or setup/prune could not complete |
 | 2 | invalid config or command input |
 | 3 | I/O or unexpected runtime error |
 | 4 | unsupported config version or platform behavior |
 
 ## Sync Event Filtering and JSON Output
 
-`ags sync --event-filter` lets you keep only selected events in text or JSON output.
+`ags sync --event-filter <events>` keeps only selected events in text or JSON
+output.
 
 ```bash
 ags sync --json --event-filter imported,generated
@@ -348,7 +388,12 @@ fields are fixed for scripts and CI machines.
 cargo test
 ```
 
-CI runs `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
-an MSRV `cargo check --workspace --all-targets`, `cargo audit`, and
-`cargo test --workspace` on Linux, macOS, and Windows. Tag pushes matching `v*`
-build release archives for Linux, macOS, and Windows.
+CI runs `cargo fmt --all --check`, Clippy with warnings denied, an MSRV
+`cargo check --workspace --all-targets --locked`, `cargo audit --deny warnings`,
+and `cargo test --workspace --locked` on Linux, macOS, and Windows. Tag pushes
+matching `v*` repeat format, lint, test, and audit verification before building
+release archives for Linux, macOS, and Windows.
+
+## License
+
+Agent Switch is available under the [MIT License](LICENSE).

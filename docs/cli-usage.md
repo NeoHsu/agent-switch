@@ -104,8 +104,8 @@ starter config that gets written. Global `--tool` is a runtime filter for
 
 ## Migrating Existing Native Tool Files
 
-Import existing Claude, Codex, Copilot, OpenCode, and Pi native files into the
-canonical layout, back up managed native paths, then run setup.
+Import existing Claude, Codex, Copilot, OpenCode, Pi, and Antigravity native
+files into the canonical layout, back up managed native paths, then run setup.
 This is the preferred first `ags` command for native-first repositories:
 
 ```bash
@@ -132,12 +132,20 @@ ags migrate --no-setup
 ```
 
 `migrate` creates `.agent-switch.yaml` if needed. For managed-link mappings it
-copies native files such as `CLAUDE.md`, `.claude/commands`, `.agents/rules`, or
-`.opencode/commands` into their canonical targets, then backs up the native
-paths as `.bak` so `setup` can create managed links, Windows directory
-junctions, or file-copy fallbacks as needed. For generated formats it imports
-`.github`, `.codex`, and `.opencode` generated files into `.agents/`.
-For MCP configs it imports known native MCP shapes into `.agents/mcp.json`.
+copies native files such as `CLAUDE.md`, `.mcp.json`, `.claude/commands`,
+`.claude/rules`, `.opencode/commands`, or `.pi/prompts` into their canonical
+targets, then backs up the native paths as `.bak` so `setup` can create managed
+links, Windows directory junctions, or file-copy fallbacks as needed. For
+generated formats it imports `.github`, `.codex`, and `.opencode` generated
+files into `.agents/`.
+For MCP configs it imports known native MCP shapes—including Antigravity's
+`.agents/mcp_config.json` and legacy `.copilot/mcp-config.json`—into
+`.agents/mcp.json`; the obsolete Copilot file is then backed up. Official Pi has
+no MCP config.
+Pi migration covers `.pi/prompts` and imports legacy `.pi/skills` content into
+the canonical directory; current Pi reads `AGENTS.md` and `.agents/skills`
+directly. Pi-only extensions, themes, and
+project settings remain unmanaged.
 Conflicting canonical files are skipped unless `--force` is used. Use
 `--keep-native` when you want to preserve native files instead of backing them
 up.
@@ -150,6 +158,12 @@ run a normal sync:
 ```bash
 ags setup
 ```
+
+When Pi is selected, setup exposes shared commands at `.pi/prompts`. Pi reads
+`AGENTS.md` and `.agents/skills` directly, so setup does not duplicate skills at
+`.pi/skills`. Project-local resources load after Pi project trust is approved.
+Pi-only extensions, themes, settings, and package state remain under `.pi/`
+without Agent Switch ownership.
 
 When Claude is selected, setup also discovers nested `AGENTS.md` files and
 creates managed same-directory `CLAUDE.md` links or copy fallbacks. For example,
@@ -167,19 +181,25 @@ ags setup --tool claude,copilot
 Remove everything Agent Switch manages for tools that are no longer selected —
 managed links, file-copy fallbacks, generated outputs, and managed MCP merge
 content (the `mcp` object in `opencode.json`, the `.codex/config.toml` marker
-block, and `.copilot/mcp-config.json`). Unmanaged real files and modified
-generated outputs are skipped and reported:
+block, and the `mcpServers` object in `.agents/mcp_config.json`). Unmanaged real
+files, modified managed-copy fallbacks, and modified generated outputs are
+skipped and reported:
 
 ```bash
 ags setup --tool codex --prune
 ```
 
-Check what setup would change without writing:
+Check what setup would change without writing. Unless `--no-sync` is also set,
+this includes the same generated-file, copy-fallback, and MCP drift check that a
+normal setup would run:
 
 ```bash
 ags setup --check
 ags setup --tool codex --prune --check
 ```
+
+Unmanaged paths or modified outputs that prevent setup or prune from completing
+are reported and return exit code `1` rather than silently succeeding.
 
 Only repair links/fallbacks and skip generated-file sync:
 
@@ -287,7 +307,13 @@ ags doctor
 ags doctor --json
 ```
 
-Validate config mappings without setup or sync side effects:
+`doctor` validates the resolved config path, canonical directory, manifest
+existence and parseability, managed-link targets, copy-fallback state, generated
+outputs, and MCP drift. Health drift returns exit code `1`. JSON output includes
+`links`, `generated_files_in_sync`, and a top-level `drift` boolean.
+
+Validate config mappings without setup or sync side effects. Unknown or
+misspelled fields are rejected instead of silently falling back to defaults:
 
 ```bash
 ags mappings validate
@@ -382,7 +408,7 @@ ags setup --tool codex --prune --check
 `ags` uses structured exit codes from the core library:
 
 - `0`: success
-- `1`: drift; `--check` detected changes that would be written
+- `1`: drift; `--check` or `doctor` detected an unhealthy or incomplete state
 - `2`: config error; invalid config, invalid option combination, unknown tool, or
   similar user-fixable input
 - `3`: I/O error; unexpected filesystem or process failure
