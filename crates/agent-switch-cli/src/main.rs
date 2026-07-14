@@ -14,10 +14,10 @@ use clap::{Args, Parser, Subcommand};
 #[command(
     name = "ags",
     version,
-    about = "Synchronize canonical .agent files with coding agent native formats."
+    about = "Synchronize canonical .agents files with coding agent native formats."
 )]
 struct Cli {
-    /// Repository root. Defaults to the nearest directory containing .agent-switch.yaml, .agent, or .git.
+    /// Repository root. Defaults to the nearest directory containing .agent-switch.yaml, .agents, or .git.
     #[arg(long, global = true, env = "AGENT_SWITCH_ROOT")]
     root: Option<PathBuf>,
     /// Path to .agent-switch.yaml. Used by migrate, setup, sync, doctor, and mappings validate.
@@ -43,7 +43,7 @@ struct Cli {
 enum Commands {
     /// Create starter config, canonical directories, sample files, and .gitignore entries.
     Init(InitArgs),
-    /// Import existing native coding-agent files into canonical .agent files.
+    /// Import existing native coding-agent files into canonical .agents files.
     Migrate(MigrateArgs),
     /// Create or repair native tool links/copies, then run sync unless --no-sync is set.
     Setup(SetupArgs),
@@ -104,10 +104,10 @@ struct SyncArgs {
     /// Report generated-file drift without writing files. Exits with the drift code on changes.
     #[arg(long)]
     check: bool,
-    /// Import native generated files back into canonical .agent files only.
+    /// Import native generated files back into canonical .agents files only.
     #[arg(long, conflicts_with = "export_only")]
     import_only: bool,
-    /// Export canonical .agent files to native tool formats only.
+    /// Export canonical .agents files to native tool formats only.
     #[arg(long, conflicts_with = "import_only")]
     export_only: bool,
     /// Ignore the existing sync manifest and rebuild it from current files.
@@ -304,7 +304,7 @@ fn run(cli: Cli) -> Result<CommandOutput> {
             } else {
                 None
             };
-            let mut out = diagnostics::doctor(&root, cfg.as_ref(), args.json)?;
+            let mut out = diagnostics::doctor_at(&root, cfg.as_ref(), &path, args.json)?;
             add_basic_diagnostics(&mut out, verbosity, "doctor", &root);
             if let Some(cfg) = cfg.as_ref() {
                 add_config_selection_diagnostics(&mut out, verbosity, cfg, tools_ref);
@@ -599,5 +599,146 @@ fn classify_error(err: &anyhow::Error) -> ExitCode {
         Some(Error::Config(_)) => ExitCode::Config,
         Some(Error::Unsupported(_)) => ExitCode::Unsupported,
         None => ExitCode::Io,
+    }
+}
+
+#[cfg(test)]
+mod docs_tests {
+    use std::{fs, path::Path};
+
+    use anyhow::Result;
+    use clap::{Parser, error::ErrorKind};
+
+    use super::Cli;
+
+    #[derive(Debug)]
+    struct DocCommand {
+        file: String,
+        line: usize,
+        origin: &'static str,
+        command: String,
+    }
+
+    #[test]
+    fn documented_commands_match_the_clap_parser() -> Result<()> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut markdown_files = vec![root.join("README.md")];
+        collect_markdown_files(&root.join("docs"), &mut markdown_files)?;
+        markdown_files.sort();
+
+        let mut commands = Vec::new();
+        for path in markdown_files {
+            let markdown = fs::read_to_string(&path)?;
+            let file = path
+                .strip_prefix(&root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            extract_commands(&file, &markdown, &mut commands);
+        }
+
+        assert!(
+            commands.len() >= 100,
+            "expected broad README/docs command coverage, found {}",
+            commands.len()
+        );
+        assert!(commands.iter().any(|command| command.origin == "bash"));
+        assert!(commands.iter().any(|command| command.origin == "inline"));
+
+        let mut failures = Vec::new();
+        for documented in commands {
+            let normalized = documented
+                .command
+                .replace("<tool>", "codex")
+                .replace("<events>", "generated");
+            let args = normalized.split_whitespace().collect::<Vec<_>>();
+            match Cli::try_parse_from(args) {
+                Ok(_) => {}
+                Err(err)
+                    if matches!(
+                        err.kind(),
+                        ErrorKind::DisplayHelp | ErrorKind::DisplayVersion
+                    ) => {}
+                Err(err) => failures.push(format!(
+                    "{}:{} ({}): `{}`\n{}",
+                    documented.file,
+                    documented.line,
+                    documented.origin,
+                    documented.command,
+                    err.render().ansi()
+                )),
+            }
+        }
+
+        assert!(
+            failures.is_empty(),
+            "documented commands rejected by Clap:\n\n{}",
+            failures.join("\n\n")
+        );
+        Ok(())
+    }
+
+    fn collect_markdown_files(
+        dir: &Path,
+        files: &mut Vec<std::path::PathBuf>,
+    ) -> std::io::Result<()> {
+        let mut entries = fs::read_dir(dir)?
+            .map(|entry| entry.map(|entry| entry.path()))
+            .collect::<std::io::Result<Vec<_>>>()?;
+        entries.sort();
+        for path in entries {
+            if path.is_dir() {
+                collect_markdown_files(&path, files)?;
+            } else if path.extension().is_some_and(|extension| extension == "md") {
+                files.push(path);
+            }
+        }
+        Ok(())
+    }
+
+    fn extract_commands(file: &str, markdown: &str, commands: &mut Vec<DocCommand>) {
+        let mut in_fence = false;
+        let mut bash_fence = false;
+
+        for (index, line) in markdown.lines().enumerate() {
+            let line_number = index + 1;
+            let trimmed = line.trim();
+            if let Some(info) = trimmed.strip_prefix("```") {
+                if in_fence {
+                    in_fence = false;
+                    bash_fence = false;
+                } else {
+                    in_fence = true;
+                    bash_fence = matches!(info.trim(), "bash" | "sh" | "shell" | "console");
+                }
+                continue;
+            }
+
+            if in_fence {
+                if bash_fence {
+                    let shell_line = trimmed.strip_prefix("$ ").unwrap_or(trimmed);
+                    if shell_line == "ags" || shell_line.starts_with("ags ") {
+                        commands.push(DocCommand {
+                            file: file.into(),
+                            line: line_number,
+                            origin: "bash",
+                            command: shell_line.into(),
+                        });
+                    }
+                }
+                continue;
+            }
+
+            for (span_index, span) in line.split('`').enumerate() {
+                if span_index % 2 == 1 && span.starts_with("ags ") {
+                    commands.push(DocCommand {
+                        file: file.into(),
+                        line: line_number,
+                        origin: "inline",
+                        command: span.into(),
+                    });
+                }
+            }
+        }
     }
 }

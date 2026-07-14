@@ -145,6 +145,19 @@ fn verbose_sync_json_keeps_stdout_machine_readable() {
 }
 
 #[test]
+fn help_uses_plural_canonical_directory() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ags"))
+        .arg("--help")
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("canonical .agents files"));
+    assert!(stdout.contains("containing .agent-switch.yaml, .agents, or .git"));
+}
+
+#[test]
 fn version_json_reports_build_metadata() {
     let output = Command::new(env!("CARGO_BIN_EXE_ags"))
         .arg("version")
