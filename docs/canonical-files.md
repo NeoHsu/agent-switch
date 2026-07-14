@@ -65,7 +65,7 @@ Sync behavior by integration type:
 | Integration type | Written by | Import behavior |
 | --- | --- | --- |
 | `link/copy` | `ags setup`; Windows file-copy fallbacks are reconciled by `ags sync` | `ags migrate` imports existing native files before replacing them with managed links, junctions, or file-copy fallbacks. Real symlink and junction edits directly update the canonical target. File-copy fallback edits can be copied back during `ags sync`. |
-| `generated` | `ags sync` export stage | `ags migrate` imports existing generated files. Later `ags sync` can import tool-side generated edits back into `.agents/` unless `--export-only` is used. |
+| `generated` | `ags sync` export stage | `ags migrate` imports existing generated files. Later imports require `sync_mode: full` or `ags sync --import-only`; the default `canonical-only` mode and `--export-only` skip import. |
 | `merged` | `ags sync` merge stage | `ags migrate` imports known native MCP shapes into `.agents/mcp.json`. Later sync merges canonical MCP config back to native configs. |
 
 <!-- markdownlint-enable MD013 -->

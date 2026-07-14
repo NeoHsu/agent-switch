@@ -19,8 +19,16 @@ or build from source with Rust 1.85 or newer:
 
 ```bash
 cargo build --release -p agent-switch-cli
+```
+
+On Unix-like systems, install the binary somewhere on `PATH`:
+
+```bash
+mkdir -p ~/.local/bin
 install -m 0755 target/release/ags ~/.local/bin/ags
 ```
+
+On Windows, copy `target\release\ags.exe` to a directory on `PATH`.
 
 ## Quickstart
 
@@ -40,8 +48,10 @@ files to import yet:
 ```bash
 ags init
 ags setup
-ags sync --export-only
 ```
+
+The generated config uses canonical-only mode, and `setup` runs the initial
+export-side sync automatically.
 
 Check for drift in CI without writing files:
 
@@ -55,8 +65,9 @@ no longer selected:
 
 ```bash
 ags setup --tool codex --prune
-ags sync --tool codex
 ```
+
+`setup` syncs the selected tool set automatically unless `--no-sync` is used.
 
 ## Commands
 
@@ -98,22 +109,15 @@ Global options:
 --debug
 ```
 
-Supported tools in v1:
+Supported tools:
 
 ```text
 claude, codex, copilot, opencode, pi, antigravity
 ```
 
-Default integrations by tool:
-
-| Tool | Native paths managed by default | Canonical source | Integration mode |
-| --- | --- | --- | --- |
-| Claude | `.claude/agents`, `.claude/commands`, `.claude/rules`, `.claude/skills`, `CLAUDE.md`, `.mcp.json` | `.agents/agents`, `.agents/commands`, `.agents/rules`, `.agents/skills`, `AGENTS.md`, `.agents/mcp.json` | symlink/copy; no generated adapter |
-| Codex | native `AGENTS.md` and `.agents/skills`; `.codex/agents/*.toml`, `.codex/config.toml` | `AGENTS.md`, `.agents/skills`, `.agents/agents/*.md`, `.agents/mcp.json` | direct context/skills discovery; generated TOML agents; MCP marker-block merge |
-| Copilot | native `AGENTS.md` and `.agents/skills`; `.github/agents/*.agent.md`, `.github/prompts/*.prompt.md`, `.github/instructions/**/*.instructions.md`, `.mcp.json` | `AGENTS.md`, `.agents/skills`, `.agents/agents`, `.agents/commands`, `.agents/rules`, `.agents/mcp.json` | direct context/skills discovery; generated Markdown; shared MCP symlink/copy |
-| OpenCode | native `AGENTS.md` and `.agents/skills`; `.opencode/commands`, `.opencode/agents/*.md`, `opencode.json` | `AGENTS.md`, `.agents/skills`, `.agents/commands`, `.agents/agents`, `.agents/mcp.json` | direct context/skills discovery; commands link; generated agents; MCP merge |
-| Pi | native `AGENTS.md` and `.agents/skills`; `.pi/prompts` | `AGENTS.md`, `.agents/skills`, `.agents/commands` | direct context/skills discovery; prompt-template link; no built-in subagents or MCP |
-| Antigravity | native `AGENTS.md`, `.agents/rules`, `.agents/skills`, and `.agents/mcp_config.json`; `.agent/workflows` compatibility path | `AGENTS.md`, `.agents/rules`, `.agents/skills`, `.agents/mcp.json`, `.agents/commands` | direct context/rules/skills discovery; native MCP conversion; workflow link |
+Default integrations prefer each tool's native discovery paths, use managed
+links or copies for shared files, generate adapters when formats differ, and
+merge canonical MCP settings into native configs when required.
 
 Pi reads root/ancestor `AGENTS.md` and `.agents/skills` directly. Agent Switch
 only exposes shared commands at Pi's native `.pi/prompts` path. Official Pi
@@ -144,8 +148,8 @@ plain-file copies.
 
 ## Project Config
 
-Agent Switch v1 reads `.agent-switch.yaml` by default. It does not read
-`scripts/mappings.yaml`.
+Agent Switch reads `.agent-switch.yaml` using config schema version `1` by
+default. It does not read `scripts/mappings.yaml`.
 
 ```yaml
 version: 1
@@ -312,8 +316,10 @@ Import native files into `.agents/`:
 ```bash
 ags --tool claude,copilot migrate
 ags doctor
-ags sync --export-only
 ```
+
+Unless `--keep-native` or `--no-setup` is used, `migrate` finishes by running
+setup and its automatic sync.
 
 Migration preserves dotted Copilot filenames such as
 `speckit.git.commit.agent.md` as `.agents/agents/speckit.git.commit.md`, infers
@@ -329,11 +335,10 @@ full Copilot instructions over same-named Claude pointer rules.
 
 ```bash
 ags setup
-ags sync
 ```
 
-The Rust CLI v1 migrates native tool files, but it does not parse arbitrary
-repo-local wrapper scripts.
+`setup` performs sync by default. The Rust CLI migrates native tool files, but
+it does not parse arbitrary repo-local wrapper scripts.
 
 ## Build
 
@@ -349,12 +354,7 @@ The release binary is:
 target/release/ags
 ```
 
-Install the release binary somewhere on your `PATH`, for example:
-
-```bash
-cargo build --release -p agent-switch-cli
-install -m 0755 target/release/ags ~/.local/bin/ags
-```
+See [Install](#install) for platform-specific installation guidance.
 
 Release builds in CI use explicit target triples for Linux, macOS, and Windows
 so archive names match the binaries they contain.

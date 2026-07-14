@@ -4,7 +4,7 @@
 formats used by coding-agent tools. For the default coding-agent path mapping,
 see [Canonical `.agents/` Files](canonical-files.md#default-integration-map).
 
-## Command Surface Review
+## Command Overview
 
 The command surface is:
 
@@ -20,12 +20,6 @@ The command surface is:
 - `doctor` is for diagnostics and drift checks.
 - `mappings validate` is for config validation in CI or preflight scripts.
 - `version` is for release/build metadata.
-
-No command is currently dead code. `mappings validate` overlaps with the
-validation that runs before `setup` and `sync`, but it is still useful when a
-script wants to validate configuration without touching generated files.
-`version` overlaps with `ags --version`, but the subcommand includes commit,
-target, and build-date metadata.
 
 ## Global Options
 
@@ -124,10 +118,15 @@ Check what would be imported/backed up without writing:
 ags migrate --check
 ```
 
-Keep existing native paths in place (equivalent to skipping setup):
+Keep existing native paths in place and skip the final setup/sync pass:
 
 ```bash
 ags migrate --keep-native
+```
+
+Import and back up native paths, but skip the final setup/sync pass:
+
+```bash
 ags migrate --no-setup
 ```
 
@@ -148,7 +147,10 @@ directly. Pi-only extensions, themes, and
 project settings remain unmanaged.
 Conflicting canonical files are skipped unless `--force` is used. Use
 `--keep-native` when you want to preserve native files instead of backing them
-up.
+up. Migration also preserves dotted Copilot agent and prompt names, infers
+missing `name` fields from native filenames, strips native suffixes such as
+`.agent.md` and `.prompt.md`, and prefers full Copilot instructions over
+same-named Claude pointer rules.
 
 ## Preparing Native Tool Files
 
@@ -278,25 +280,6 @@ ags sync --json --event-filter drift,synced_no_changes
 
 `--import-only` and `--export-only` are mutually exclusive. `--check` can be
 combined with either one to test one direction without writing files.
-
-## Migrating Native Files
-
-Populate `.agents/` from existing native files:
-
-```bash
-ags --tool claude,copilot migrate
-```
-
-Preview without writing:
-
-```bash
-ags --tool claude,copilot migrate --check
-```
-
-`migrate` preserves dotted Copilot agent and prompt names, infers missing
-`name` fields from native filenames, strips native suffixes such as
-`.agent.md` and `.prompt.md`, and prefers full Copilot instructions over
-same-named Claude pointer rules.
 
 ## Diagnostics and Validation
 

@@ -103,7 +103,7 @@ crates/
                                                                          v               v
                                                    +--------+------+  +-----+-----------+
                                                    | diagnostics   |  | diagnostics     |
-                                                   | ::doctor      |  | ::validate      |
+                                                   | ::doctor_at   |  | ::validate      |
                                                    +---------------+  +-----------------+
 
 version:
@@ -380,7 +380,7 @@ Manifest 檔案：`.agents/.sync-manifest.json`
   "meta": {
     "version": 1,
     "tool": "agent-switch",
-    "tool_version": "0.2.1"
+    "tool_version": "<ags-version>"
   }
 }
 ```
