@@ -65,7 +65,8 @@ crates/
     ├── src/sync/                sync plan, events, report, stages
     ├── src/formats/             markdown, copilot, opencode, codex adapters
     ├── src/mcp.rs               MCP merge adapters
-    ├── src/fs.rs                filesystem helpers and atomic writes
+    ├── src/fs.rs                filesystem helpers, repository lock, and atomic writes
+    ├── src/output.rs            versioned machine-readable CLI output
     ├── src/manifest.rs          sync manifest load/save/hash
     ├── src/diagnostics.rs       doctor and mapping validation
     └── src/tool.rs              Tool/Format/MergeFormat enums and ownership rules
@@ -447,15 +448,29 @@ Codex merge 只替換 marker block，不覆蓋 marker 外的使用者設定。
 
 ## Filesystem Safety
 
-`fs.rs` 集中處理檔案安全與跨平台細節：
+`fs.rs` 集中處理檔案安全與跨平台細節。所有會寫入 repository 的 CLI
+command 會在 dispatch 前取得 `.agent-switch.lock` 的 exclusive lock；
+`--check`、`doctor` 與 validation paths 不取得 write lock，也不寫入檔案。
+這個 lock 是 process-level coordination，並不取代 manifest 的內容/ownership
+驗證。
 
 - `read_text`：UTF-8 read，並容忍 leading UTF-8 BOM。
 - `repo_path`：輸出路徑一律 forward slash。
 - `write_if_changed`：內容相同不寫入；I/O error 不靜默吞掉。
 - `atomic_write`：先寫 temp file、sync，再 rename replace。
+- `RepositoryLock`：拒絕 symlink/非 regular-file lock path，並以 `fs2` 序列化
+  同一 repository 的 mutating invocations。
 - `relative_link`：產生 relative symlink target。
 - `is_fake_symlink`：偵測 git checkout 後的 symlink placeholder text file。
 - `remove_file_or_empty_dir`：跨平台刪 symlink/file/empty dir。
+
+## Machine-readable Output Contract
+
+`output.rs` 集中處理 JSON response 的 envelope contract。所有 JSON object
+response 都以 additive `schemaVersion: 1` 開始；command-specific fields 維持
+原有命名，讓 automation 能先驗證 schema 再解讀 payload。command report 之前
+發生的 runtime errors 會在 requested JSON mode 下輸出 versioned error object
+到 stderr；diagnostic reports 仍留在 stdout。
 
 ## Events, JSON Output, and Exit Codes
 
@@ -465,8 +480,10 @@ Sync event kinds：
 imported, generated, removed, copied, warning, merged, drift, synced_no_changes
 ```
 
-JSON output 會 stable sort events，並包含 summary、options、exit 與 exit
-code，方便 CI 或 script 使用。
+JSON output 會 stable sort events，並包含 `schemaVersion`、summary、options、exit
+與 exit code，方便 CI 或 script 使用。`doctor`、`mappings validate`、`version`
+與 sync 共用同一個 output renderer；runtime errors 在 JSON mode 也遵循同一
+schema version。
 
 Exit codes：
 

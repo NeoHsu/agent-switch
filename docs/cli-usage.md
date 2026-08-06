@@ -41,7 +41,14 @@ for commands that do not use them. They are kept global so scripts can pass
 common options consistently before or after subcommands.
 
 Verbose and debug diagnostics are written to stderr, so JSON stdout remains
-machine-readable.
+machine-readable. Every JSON object response includes additive `schemaVersion: 1`;
+the command-specific fields remain stable. Runtime failures before a command
+report are rendered as versioned error objects on stderr; diagnostic reports stay
+on stdout.
+
+Mutating commands acquire the per-repository `.agent-switch.lock` before dispatch
+so concurrent `ags` processes cannot interleave manifest or generated-file writes.
+`--check`, `doctor`, and mapping validation paths remain read-only.
 
 ## Choosing `init` vs `migrate`
 
@@ -269,7 +276,8 @@ ags sync --check --json
 ```
 
 JSON sync events include a deterministic `sequence` field that records event
-production order before text/JSON event sorting.
+production order before text/JSON event sorting. The response also includes
+`schemaVersion: 1` for automation contract negotiation.
 
 Filter noisy events in text or JSON output:
 
