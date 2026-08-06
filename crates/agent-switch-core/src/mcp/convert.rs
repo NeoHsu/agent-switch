@@ -3,12 +3,9 @@
 use super::*;
 use toml_edit::{DocumentMut, Item, Table, value};
 
-pub(super) fn convert_opencode_mcp(canonical: &Value) -> Value {
-    let Some(servers) = canonical.get("mcpServers").and_then(Value::as_object) else {
-        return json!({});
-    };
+pub(super) fn convert_opencode_mcp(canonical: &CanonicalMcpConfig) -> Value {
     let mut out = serde_json::Map::new();
-    for (name, server) in servers {
+    for (name, server) in &canonical.servers {
         let Some(server_obj) = server.as_object() else {
             continue;
         };
@@ -51,12 +48,9 @@ pub(super) fn convert_opencode_mcp(canonical: &Value) -> Value {
     Value::Object(out)
 }
 
-pub(super) fn convert_copilot_mcp(canonical: &Value) -> Value {
-    let Some(servers) = canonical.get("mcpServers").and_then(Value::as_object) else {
-        return json!({ "mcpServers": {} });
-    };
+pub(super) fn convert_copilot_mcp(canonical: &CanonicalMcpConfig) -> Value {
     let mut out = serde_json::Map::new();
-    for (name, server) in servers {
+    for (name, server) in &canonical.servers {
         let mut cfg = serde_json::Map::new();
         if server.get("url").is_some()
             || matches!(str_field(server, "type"), Some("http" | "sse" | "remote"))
@@ -89,12 +83,9 @@ pub(super) fn convert_copilot_mcp(canonical: &Value) -> Value {
     json!({ "mcpServers": out })
 }
 
-pub(super) fn convert_antigravity_mcp(canonical: &Value) -> Value {
-    let Some(servers) = canonical.get("mcpServers").and_then(Value::as_object) else {
-        return json!({ "mcpServers": {} });
-    };
+pub(super) fn convert_antigravity_mcp(canonical: &CanonicalMcpConfig) -> Value {
     let mut out = serde_json::Map::new();
-    for (name, server) in servers {
+    for (name, server) in &canonical.servers {
         let Some(server_obj) = server.as_object() else {
             continue;
         };
@@ -184,11 +175,11 @@ fn tool_list(server: &Value) -> Value {
     json!(["*"])
 }
 
-pub(super) fn render_codex_mcp_block(canonical: &Value) -> String {
+pub(super) fn render_codex_mcp_block(canonical: &CanonicalMcpConfig) -> String {
     let mut doc = DocumentMut::new();
-    if let Some(servers) = canonical.get("mcpServers").and_then(Value::as_object) {
+    if !canonical.servers.is_empty() {
         let mut mcp_servers = Table::new();
-        for (name, server) in servers {
+        for (name, server) in &canonical.servers {
             let mut table = Table::new();
             if let Some(url) = server.get("url").and_then(Value::as_str) {
                 table["url"] = value(url);

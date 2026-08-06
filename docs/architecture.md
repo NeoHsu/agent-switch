@@ -67,7 +67,7 @@ crates/
     ├── src/sync.rs              sync orchestration
     ├── src/sync/                sync plan, events, report, stages
     ├── src/formats/             markdown, copilot, opencode, codex adapters
-    ├── src/mcp/                 MCP facade plus convert/import/merge/prune adapters
+    ├── src/mcp/                 typed canonical MCP boundary plus native adapters
     ├── src/fs.rs                filesystem helpers, lock/journal, and atomic writes
     ├── src/output.rs            versioned machine-readable CLI output
     ├── src/manifest.rs          sync manifest load/save/hash

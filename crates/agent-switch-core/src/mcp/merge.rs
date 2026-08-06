@@ -12,7 +12,7 @@ pub(super) fn merge_opencode(canonical_mcp: &Path, target: &Path, check: bool) -
     if !canonical_mcp.exists() {
         return Ok(false);
     }
-    let canonical: Value = serde_json::from_str(&read_text(canonical_mcp)?)?;
+    let canonical = read_canonical(canonical_mcp)?;
     let mut target_json = if target.exists() {
         serde_json::from_str::<Value>(&read_text(target)?)?
     } else {
@@ -39,7 +39,7 @@ pub(super) fn merge_codex(canonical_mcp: &Path, target: &Path, check: bool) -> R
     if !canonical_mcp.exists() {
         return Ok(false);
     }
-    let canonical: Value = serde_json::from_str(&read_text(canonical_mcp)?)?;
+    let canonical = read_canonical(canonical_mcp)?;
     let block = render_codex_mcp_block(&canonical);
     let existing = read_existing_text(target)?;
     let next = replace_marker_block(&existing, &block);
@@ -56,7 +56,7 @@ pub(super) fn merge_copilot(canonical_mcp: &Path, target: &Path, check: bool) ->
     if !canonical_mcp.exists() {
         return Ok(false);
     }
-    let canonical: Value = serde_json::from_str(&read_text(canonical_mcp)?)?;
+    let canonical = read_canonical(canonical_mcp)?;
     let text = format!(
         "{}\n",
         serde_json::to_string_pretty(&convert_copilot_mcp(&canonical))?
@@ -74,7 +74,7 @@ pub(super) fn merge_antigravity(canonical_mcp: &Path, target: &Path, check: bool
     if !canonical_mcp.exists() {
         return Ok(false);
     }
-    let canonical: Value = serde_json::from_str(&read_text(canonical_mcp)?)?;
+    let canonical = read_canonical(canonical_mcp)?;
     let converted = convert_antigravity_mcp(&canonical);
     let mut target_json = if target.exists() {
         serde_json::from_str::<Value>(&read_text(target)?)?

@@ -14,10 +14,12 @@ use crate::{
 mod convert;
 mod import;
 mod merge;
+mod model;
 mod prune;
 
 use import::{import_antigravity_mcp, import_codex_mcp, import_copilot_mcp, import_opencode_mcp};
 use merge::{merge_antigravity, merge_codex, merge_copilot, merge_opencode};
+use model::CanonicalMcpConfig;
 use prune::{prune_antigravity, prune_codex, prune_copilot, prune_opencode};
 
 const CODEX_START: &str = "# >>> agent-switch:mcp >>>";
@@ -93,6 +95,10 @@ pub fn import_native(format: MergeFormat, target: &Path) -> Result<Option<Value>
     Ok(Some(canonical))
 }
 
+fn read_canonical(path: &Path) -> Result<CanonicalMcpConfig> {
+    CanonicalMcpConfig::from_json(&read_text(path)?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::convert::{
@@ -104,6 +110,25 @@ mod tests {
 
     fn block() -> &'static str {
         "# >>> agent-switch:mcp >>>\n[mcp_servers.demo]\ncommand = \"npx\"\n# <<< agent-switch:mcp <<<\n"
+    }
+
+    fn canonical(value: Value) -> CanonicalMcpConfig {
+        CanonicalMcpConfig::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn canonical_mcp_boundary_defaults_servers_and_preserves_metadata() {
+        let config = canonical(json!({"metadata": {"owner": "team"}}));
+
+        assert!(config.servers.is_empty());
+        assert_eq!(config.extra["metadata"]["owner"], "team");
+    }
+
+    #[test]
+    fn canonical_mcp_boundary_rejects_non_object_servers() {
+        let error = CanonicalMcpConfig::from_value(json!({"mcpServers": []}));
+
+        assert!(error.is_err());
     }
 
     #[test]
@@ -135,7 +160,7 @@ mod tests {
 
     #[test]
     fn codex_mcp_block_renders_command_args_and_env() {
-        let canonical = json!({
+        let canonical = canonical(json!({
             "mcpServers": {
                 "context7": {
                     "command": "npx",
@@ -143,7 +168,7 @@ mod tests {
                     "env": {"KEY": "${KEY}"}
                 }
             }
-        });
+        }));
 
         let rendered = render_codex_mcp_block(&canonical);
 
@@ -156,7 +181,7 @@ mod tests {
 
     #[test]
     fn codex_mcp_block_renders_http_servers_and_tool_policy() {
-        let canonical = json!({
+        let canonical = canonical(json!({
             "mcpServers": {
                 "figma": {
                     "url": "https://mcp.figma.com/mcp",
@@ -168,7 +193,7 @@ mod tests {
                     "enabled": true
                 }
             }
-        });
+        }));
 
         let rendered = render_codex_mcp_block(&canonical);
 
@@ -184,7 +209,7 @@ mod tests {
 
     #[test]
     fn opencode_mcp_conversion_preserves_current_native_options() -> Result<()> {
-        let canonical = json!({
+        let canonical = canonical(json!({
             "mcpServers": {
                 "local": {
                     "command": "node",
@@ -202,7 +227,7 @@ mod tests {
                     "timeout": 7000
                 }
             }
-        });
+        }));
 
         let converted = convert_opencode_mcp(&canonical);
         assert_eq!(converted["local"]["enabled"], false);
@@ -225,7 +250,7 @@ mod tests {
 
     #[test]
     fn antigravity_mcp_conversion_normalizes_remote_urls_and_round_trips() -> Result<()> {
-        let canonical = json!({
+        let canonical = canonical(json!({
             "mcpServers": {
                 "local": {
                     "command": "node",
@@ -238,7 +263,7 @@ mod tests {
                     "disabled_tools": ["dangerous"]
                 }
             }
-        });
+        }));
 
         let converted = convert_antigravity_mcp(&canonical);
         assert_eq!(
@@ -263,7 +288,7 @@ mod tests {
 
     #[test]
     fn copilot_mcp_conversion_adds_required_type_and_tools() {
-        let canonical = json!({
+        let canonical = canonical(json!({
             "mcpServers": {
                 "playwright": {
                     "command": "npx",
@@ -277,7 +302,7 @@ mod tests {
                     "tools": ["resolve-library-id"]
                 }
             }
-        });
+        }));
 
         let converted = convert_copilot_mcp(&canonical);
 

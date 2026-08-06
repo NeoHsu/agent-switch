@@ -93,7 +93,7 @@ pub(super) fn prune_copilot(
     if !canonical_mcp.exists() {
         return Ok(PruneOutcome::Unmanaged);
     }
-    let canonical: Value = serde_json::from_str(&read_text(canonical_mcp)?)?;
+    let canonical = read_canonical(canonical_mcp)?;
     let expected = format!(
         "{}\n",
         serde_json::to_string_pretty(&convert_copilot_mcp(&canonical))?
