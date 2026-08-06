@@ -48,8 +48,11 @@ report are rendered as versioned error objects on stderr; diagnostic reports sta
 on stdout.
 
 Mutating commands acquire the per-repository `.agent-switch.lock` before dispatch
-so concurrent `ags` processes cannot interleave manifest or generated-file writes.
-`--check`, `doctor`, and mapping validation paths remain read-only.
+so concurrent `ags` processes cannot interleave manifest or generated-file writes. They
+also leave a temporary `.agent-switch.operation.json` journal while running; a later
+mutation reports an interrupted operation if the previous process exited before cleanup.
+`--check`, `doctor`, and mapping validation paths remain read-only and do not create a
+journal.
 
 ## Choosing `init` vs `migrate`
 
@@ -339,9 +342,11 @@ ags sync --reset-manifest
 
 `ags doctor` reports the manifest path and the same recovery hint. If an older
 script cannot pass `--reset-manifest`, deleting `.agents/.sync-manifest.json`
-and then running `ags sync` is equivalent. Permission errors include the
-attempted action and path, for example creating a parent directory, creating a
-symlink, or replacing a generated file.
+and then running `ags sync` is equivalent. If a process is interrupted during a
+mutation, rerun the same or another mutating command; the stale operation journal is
+recognized under the repository lock and reported as a warning. Permission errors
+include the attempted action and path, for example creating a parent directory,
+creating a symlink, or replacing a generated file.
 
 ## Version Metadata
 

@@ -53,8 +53,9 @@ Cargo.toml
 crates/
 ├── agent-switch-cli/
 │   ├── build.rs                 build metadata: target, git SHA, build date
-│   ├── src/main.rs              clap CLI, exit-code mapping, command dispatch
-│   ├── src/invocation.rs        resolved root/config/tools, verbosity, mutation lock
+│   ├── src/main.rs              clap CLI, exit-code mapping, process lifecycle
+│   ├── src/commands.rs          command dispatch, handlers, diagnostics
+│   ├── src/invocation.rs        resolved root/config/tools, verbosity, mutation lock/journal
 │   ├── src/operation.rs         command effect and output-mode classification
 │   └── tests/cli.rs             CLI integration tests
 └── agent-switch-core/
@@ -67,7 +68,7 @@ crates/
     ├── src/sync/                sync plan, events, report, stages
     ├── src/formats/             markdown, copilot, opencode, codex adapters
     ├── src/mcp/                 MCP facade plus convert/import/merge/prune adapters
-    ├── src/fs.rs                filesystem helpers, repository lock, and atomic writes
+    ├── src/fs.rs                filesystem helpers, lock/journal, and atomic writes
     ├── src/output.rs            versioned machine-readable CLI output
     ├── src/manifest.rs          sync manifest load/save/hash
     ├── src/diagnostics.rs       doctor and mapping validation
@@ -124,10 +125,11 @@ Root discovery 順序：
 
 Config 預設讀取 `.agent-switch.yaml`，也可用 `--config` 指定。
 
-每次 CLI invocation 先由 `operation::classify` 判斷是否會寫入檔案、是否要求
-JSON output，再由 `Invocation` 一次解析 root/config/tool filter、verbosity 與
-repository lock。command handlers 只接收這個已解析的 context，避免各 command
-自行重新推導執行目標。
+每次 CLI invocation 先由 `operation::classify` 判斷 operation、是否會寫入檔案、
+是否要求 JSON output，再由 `Invocation` 一次解析 root/config/tool filter、verbosity、
+repository lock 與 mutation journal。`commands.rs` 負責 command handlers 與 diagnostics，
+`main.rs` 只負責 parse、render、exit；command handlers 只接收已解析的 context，避免
+各 command 自行重新推導執行目標。
 
 ## Config Schema and Validation
 
@@ -459,10 +461,12 @@ Codex merge 只替換 marker block，不覆蓋 marker 外的使用者設定。
 ## Filesystem Safety
 
 `fs.rs` 集中處理檔案安全與跨平台細節。所有會寫入 repository 的 CLI
-command 會在 dispatch 前取得 `.agent-switch.lock` 的 exclusive lock；
-`--check`、`doctor` 與 validation paths 不取得 write lock，也不寫入檔案。
-這個 lock 是 process-level coordination，並不取代 manifest 的內容/ownership
-驗證。
+command 會在 dispatch 前取得 `.agent-switch.lock` 的 exclusive lock，並建立
+`.agent-switch.operation.json` mutation journal；成功後清除 journal，若 process
+中斷，下一次 mutating invocation 會在 lock 保護下辨識並回報上一個未完成 operation。
+`--check`、`doctor` 與 validation paths 不取得 write lock，也不寫入檔案。這個 lock
+是 process-level coordination，journal 是 interrupted-operation recovery hint，兩者
+都不取代 manifest 的內容/ownership 驗證。
 
 - `read_text`：UTF-8 read，並容忍 leading UTF-8 BOM。
 - `repo_path`：輸出路徑一律 forward slash。
@@ -470,6 +474,8 @@ command 會在 dispatch 前取得 `.agent-switch.lock` 的 exclusive lock；
 - `atomic_write`：先寫 temp file、sync，再 rename replace。
 - `RepositoryLock`：拒絕 symlink/非 regular-file lock path，並以 `fs2` 序列化
   同一 repository 的 mutating invocations。
+- `RepositoryOperation`：以 versioned journal 記錄 command、PID 與開始時間；正常
+  完成會清除，異常中斷則保留供下一次 invocation 顯示 recovery warning。
 - `relative_link`：產生 relative symlink target。
 - `is_fake_symlink`：偵測 git checkout 後的 symlink placeholder text file。
 - `remove_file_or_empty_dir`：跨平台刪 symlink/file/empty dir。
@@ -537,7 +543,7 @@ pattern 為 `v*`。
 - setup/prune/config validation：`crates/agent-switch-core/tests/setup.rs`
 - sync pipeline and JSON report：`crates/agent-switch-core/tests/sync.rs`
 - CLI exit/output integration：`crates/agent-switch-cli/tests/cli.rs`
-- machine-readable schema、lock 與 output contract：`crates/agent-switch-core/tests/contracts.rs`
+- machine-readable schema、lock、operation journal 與 output contract：`crates/agent-switch-core/tests/contracts.rs`
 - README/docs command examples：CLI unit test 交給實際 Clap parser 驗證
 
 CI 預期執行：
