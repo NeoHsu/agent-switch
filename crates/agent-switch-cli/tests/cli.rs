@@ -1,5 +1,6 @@
 use std::{fs, process::Command};
 
+use agent_switch_core::fs::REPOSITORY_OPERATION_FILE;
 use tempfile::tempdir;
 
 #[test]
@@ -142,6 +143,65 @@ fn verbose_sync_json_keeps_stdout_machine_readable() {
     );
     assert!(
         stderr.contains("verbose: sync stages: export, remove-stale, sync-links, merge"),
+        "stderr was: {stderr}"
+    );
+}
+
+#[test]
+fn read_only_check_does_not_create_operation_journal() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+
+    let init = Command::new(env!("CARGO_BIN_EXE_ags"))
+        .arg("--root")
+        .arg(root)
+        .arg("init")
+        .output()
+        .unwrap();
+    assert_eq!(init.status.code(), Some(0));
+
+    let check = Command::new(env!("CARGO_BIN_EXE_ags"))
+        .arg("--root")
+        .arg(root)
+        .arg("sync")
+        .arg("--check")
+        .output()
+        .unwrap();
+
+    assert!(check.status.code().is_some_and(|code| code <= 1));
+    assert!(!root.join(REPOSITORY_OPERATION_FILE).exists());
+}
+
+#[test]
+fn interrupted_mutation_is_recovered_on_next_successful_mutation() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+    fs::write(root.join(".agent-switch.yaml"), "version: 999\n").unwrap();
+
+    let failed = Command::new(env!("CARGO_BIN_EXE_ags"))
+        .arg("--root")
+        .arg(root)
+        .arg("sync")
+        .output()
+        .unwrap();
+
+    assert_eq!(failed.status.code(), Some(4));
+    assert!(root.join(REPOSITORY_OPERATION_FILE).is_file());
+
+    fs::remove_file(root.join(".agent-switch.yaml")).unwrap();
+    let recovered = Command::new(env!("CARGO_BIN_EXE_ags"))
+        .arg("--root")
+        .arg(root)
+        .arg("init")
+        .arg("--force")
+        .output()
+        .unwrap();
+
+    assert_eq!(recovered.status.code(), Some(0));
+    assert!(!root.join(REPOSITORY_OPERATION_FILE).exists());
+    let stderr = String::from_utf8_lossy(&recovered.stderr);
+    assert!(
+        stderr.contains("warning: recovered interrupted sync operation"),
         "stderr was: {stderr}"
     );
 }

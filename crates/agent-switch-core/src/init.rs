@@ -191,6 +191,7 @@ fn gitignore_block(cfg: &Config) -> String {
         GITIGNORE_START.to_string(),
         "# Agent Switch runtime state".to_string(),
         crate::fs::REPOSITORY_LOCK_FILE.to_string(),
+        crate::fs::REPOSITORY_OPERATION_FILE.to_string(),
         crate::fs::repo_path(&cfg.manifest),
     ];
 

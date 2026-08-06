@@ -7,13 +7,19 @@ use std::{
     path::{Path, PathBuf},
     process,
     sync::atomic::{AtomicU64, Ordering},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::Result;
 use fs2::FileExt;
+use serde::{Deserialize, Serialize};
 
 /// Per-repository lock held by mutating CLI commands.
 pub const REPOSITORY_LOCK_FILE: &str = ".agent-switch.lock";
+/// Journal left behind when a mutating invocation does not complete normally.
+pub const REPOSITORY_OPERATION_FILE: &str = ".agent-switch.operation.json";
+/// Version of the on-disk interrupted-operation journal.
+pub const OPERATION_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug)]
 pub struct RepositoryLock {
@@ -25,14 +31,7 @@ impl RepositoryLock {
     pub fn acquire(root: &Path) -> Result<Self> {
         fs::create_dir_all(root).map_err(|err| io_error("create repository root", root, err))?;
         let path = root.join(REPOSITORY_LOCK_FILE);
-        if let Ok(metadata) = fs::symlink_metadata(&path) {
-            if metadata.file_type().is_symlink() || !metadata.is_file() {
-                return Err(anyhow::anyhow!(
-                    "refusing unsafe repository lock path: {}",
-                    path.display()
-                ));
-            }
-        }
+        ensure_regular_state_path(&path, "repository lock")?;
 
         let file = OpenOptions::new()
             .create(true)
@@ -50,6 +49,91 @@ impl RepositoryLock {
 impl Drop for RepositoryLock {
     fn drop(&mut self) {
         let _ = FileExt::unlock(&self.file);
+    }
+}
+
+fn ensure_regular_state_path(path: &Path, description: &str) -> Result<()> {
+    if let Ok(metadata) = fs::symlink_metadata(path) {
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(anyhow::anyhow!(
+                "refusing unsafe {description} path: {}",
+                path.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Durable marker for a mutating invocation that may have been interrupted.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct OperationRecord {
+    pub schema_version: u32,
+    pub command: String,
+    pub pid: u32,
+    pub started_at_unix_secs: u64,
+}
+
+#[derive(Debug)]
+pub struct RepositoryOperation {
+    path: PathBuf,
+    recovered: Option<OperationRecord>,
+}
+
+impl RepositoryOperation {
+    /// Start a journaled repository operation after the repository lock is held.
+    pub fn begin(root: &Path, command: &str) -> Result<Self> {
+        let path = root.join(REPOSITORY_OPERATION_FILE);
+        ensure_regular_state_path(&path, "repository operation journal")?;
+        let recovered = match fs::symlink_metadata(&path) {
+            Ok(_) => {
+                let content = read_text(&path)
+                    .map_err(|err| io_error("read repository operation journal", &path, err))?;
+                let record: OperationRecord = serde_json::from_str(&content).map_err(|err| {
+                    anyhow::anyhow!(
+                        "repository operation journal is not parseable: {}: {err}",
+                        path.display()
+                    )
+                })?;
+                if record.schema_version != OPERATION_SCHEMA_VERSION {
+                    return Err(anyhow::anyhow!(
+                        "unsupported repository operation journal version {}: {}",
+                        record.schema_version,
+                        path.display()
+                    ));
+                }
+                Some(record)
+            }
+            Err(err) if err.kind() == io::ErrorKind::NotFound => None,
+            Err(err) => return Err(io_error("inspect repository operation journal", &path, err)),
+        };
+        let record = OperationRecord {
+            schema_version: OPERATION_SCHEMA_VERSION,
+            command: command.to_string(),
+            pid: process::id(),
+            started_at_unix_secs: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_or(0, |duration| duration.as_secs()),
+        };
+        let text = format!("{}\n", serde_json::to_string_pretty(&record)?);
+        atomic_write(&path, text.as_bytes())?;
+        Ok(Self { path, recovered })
+    }
+
+    pub fn recovered(&self) -> Option<&OperationRecord> {
+        self.recovered.as_ref()
+    }
+
+    /// Clear the journal after all command mutations have completed.
+    pub fn complete(&self) -> Result<()> {
+        match fs::remove_file(&self.path) {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(io_error(
+                "clear repository operation journal",
+                &self.path,
+                err,
+            )),
+        }
     }
 }
 

@@ -1,5 +1,6 @@
 /target/
 /.agent-switch.lock
+/.agent-switch.operation.json
 /.agent-switch.yaml
 /.agentstitch.yaml
 /.agents/

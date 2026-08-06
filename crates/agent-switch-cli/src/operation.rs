@@ -4,24 +4,26 @@ use super::{Commands, MappingsCommand, MappingsSubcommand};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct CommandEffect {
+    pub(crate) operation: &'static str,
     pub(crate) mutates_files: bool,
     pub(crate) json_output: bool,
 }
 
 pub(crate) fn classify(command: &Commands) -> CommandEffect {
-    let (mutates_files, json_output) = match command {
-        Commands::Init(_) => (true, false),
-        Commands::Migrate(args) => (!args.check, false),
-        Commands::Setup(args) => (!args.check, false),
-        Commands::Sync(args) => (!args.check, args.json),
-        Commands::Doctor(args) => (false, args.json),
+    let (operation, mutates_files, json_output) = match command {
+        Commands::Init(_) => ("init", true, false),
+        Commands::Migrate(args) => ("migrate", !args.check, false),
+        Commands::Setup(args) => ("setup", !args.check, false),
+        Commands::Sync(args) => ("sync", !args.check, args.json),
+        Commands::Doctor(args) => ("doctor", false, args.json),
         Commands::Mappings(MappingsCommand {
             command: MappingsSubcommand::Validate(args),
-        }) => (false, args.json),
-        Commands::Version(args) => (false, args.json),
+        }) => ("mappings validate", false, args.json),
+        Commands::Version(args) => ("version", false, args.json),
     };
 
     CommandEffect {
+        operation,
         mutates_files,
         json_output,
     }
@@ -44,6 +46,7 @@ mod tests {
         assert_eq!(
             effect(&["ags", "sync"]),
             CommandEffect {
+                operation: "sync",
                 mutates_files: true,
                 json_output: false,
             }
@@ -51,6 +54,7 @@ mod tests {
         assert_eq!(
             effect(&["ags", "sync", "--check", "--json"]),
             CommandEffect {
+                operation: "sync",
                 mutates_files: false,
                 json_output: true,
             }
@@ -58,6 +62,7 @@ mod tests {
         assert_eq!(
             effect(&["ags", "doctor", "--json"]),
             CommandEffect {
+                operation: "doctor",
                 mutates_files: false,
                 json_output: true,
             }

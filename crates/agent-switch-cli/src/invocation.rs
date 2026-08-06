@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use agent_switch_core::{
     config::{self, Config},
-    fs::RepositoryLock,
+    fs::{OperationRecord, RepositoryLock, RepositoryOperation},
     tool::Tool,
 };
 use anyhow::Result;
@@ -18,14 +18,16 @@ pub(crate) struct Verbosity {
 
 /// Resolved runtime state for one command.
 ///
-/// Keeping root/config/tool resolution and the mutation lock together prevents
-/// individual handlers from accidentally using different repository context.
+/// Keeping root/config/tool resolution, the mutation lock, and the operation
+/// journal together prevents individual handlers from using different repository
+/// context or forgetting mutation lifecycle cleanup.
 #[derive(Debug)]
 pub(crate) struct Invocation {
     pub(crate) root: PathBuf,
     config_path: Option<PathBuf>,
     tools: Option<Vec<Tool>>,
     pub(crate) verbosity: Verbosity,
+    repository_operation: Option<RepositoryOperation>,
     _repository_lock: Option<RepositoryLock>,
 }
 
@@ -34,6 +36,7 @@ impl Invocation {
     pub(crate) fn from_cli(
         root_arg: Option<&Path>,
         config_path: Option<PathBuf>,
+        operation: &'static str,
         tool_filter: Option<&str>,
         init_tools: Option<&str>,
         mutates_files: bool,
@@ -50,6 +53,11 @@ impl Invocation {
         } else {
             None
         };
+        let repository_operation = if mutates_files {
+            Some(RepositoryOperation::begin(&root, operation)?)
+        } else {
+            None
+        };
 
         Ok(Self {
             root,
@@ -59,6 +67,7 @@ impl Invocation {
                 verbose: verbose || debug,
                 debug,
             },
+            repository_operation,
             _repository_lock: repository_lock,
         })
     }
@@ -77,5 +86,19 @@ impl Invocation {
 
     pub(crate) fn load_config(&self) -> Result<(Config, PathBuf)> {
         config::load_config(&self.root, self.config_path.as_deref())
+    }
+
+    pub(crate) fn recovered_operation(&self) -> Option<&OperationRecord> {
+        self.repository_operation
+            .as_ref()
+            .and_then(RepositoryOperation::recovered)
+    }
+
+    pub(crate) fn complete(&mut self) -> Result<()> {
+        if let Some(operation) = self.repository_operation.as_ref() {
+            operation.complete()?;
+        }
+        self.repository_operation = None;
+        Ok(())
     }
 }
