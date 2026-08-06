@@ -2,7 +2,7 @@
 
 use std::{
     ffi::{OsStr, OsString},
-    fs::{self, OpenOptions},
+    fs::{self, File, OpenOptions},
     io::{self, Write},
     path::{Path, PathBuf},
     process,
@@ -10,6 +10,48 @@ use std::{
 };
 
 use anyhow::Result;
+use fs2::FileExt;
+
+/// Per-repository lock held by mutating CLI commands.
+pub const REPOSITORY_LOCK_FILE: &str = ".agent-switch.lock";
+
+#[derive(Debug)]
+pub struct RepositoryLock {
+    file: File,
+}
+
+impl RepositoryLock {
+    /// Acquire the repository lock, waiting for another `ags` process to finish.
+    pub fn acquire(root: &Path) -> Result<Self> {
+        fs::create_dir_all(root).map_err(|err| io_error("create repository root", root, err))?;
+        let path = root.join(REPOSITORY_LOCK_FILE);
+        if let Ok(metadata) = fs::symlink_metadata(&path) {
+            if metadata.file_type().is_symlink() || !metadata.is_file() {
+                return Err(anyhow::anyhow!(
+                    "refusing unsafe repository lock path: {}",
+                    path.display()
+                ));
+            }
+        }
+
+        let file = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(&path)
+            .map_err(|err| io_error("open repository lock", &path, err))?;
+        file.lock_exclusive()
+            .map_err(|err| io_error("lock repository", &path, err))?;
+        Ok(Self { file })
+    }
+}
+
+impl Drop for RepositoryLock {
+    fn drop(&mut self) {
+        let _ = FileExt::unlock(&self.file);
+    }
+}
 
 static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 use pathdiff::diff_paths;

@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+fs2.workspace = true
 pathdiff.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -16,6 +17,9 @@ strum.workspace = true
 thiserror.workspace = true
 toml_edit.workspace = true
 walkdir.workspace = true
+
+[lints]
+workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -190,6 +190,7 @@ fn gitignore_block(cfg: &Config) -> String {
     let mut lines = vec![
         GITIGNORE_START.to_string(),
         "# Agent Switch runtime state".to_string(),
+        crate::fs::REPOSITORY_LOCK_FILE.to_string(),
         crate::fs::repo_path(&cfg.manifest),
     ];
 
