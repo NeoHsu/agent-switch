@@ -3,11 +3,11 @@ use std::collections::HashSet;
 use anyhow::{Context, Result};
 use serde::Serialize;
 
-use crate::{CommandOutput, ExitCode};
+use crate::{output, CommandOutput, ExitCode};
 
 use super::{
-    SyncOptions,
     event::{SyncEvent, SyncEventKind},
+    SyncOptions,
 };
 
 #[derive(Debug, Default)]
@@ -168,6 +168,6 @@ impl SyncReport {
             events,
         };
 
-        serde_json::to_string_pretty(&payload).context("failed to serialize sync events")
+        output::render_json(&payload).context("failed to serialize sync events")
     }
 }

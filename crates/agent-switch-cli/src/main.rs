@@ -4,8 +4,8 @@ use std::{
 };
 
 use agent_switch_core::{
-    CommandOutput, Error, ExitCode, TOOL_VERSION, config, diagnostics, fs, init, migrate, setup,
-    sync, tool::Tool,
+    config, diagnostics, fs, init, migrate, output, setup, sync, tool::Tool, CommandOutput, Error,
+    ExitCode, TOOL_VERSION,
 };
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
@@ -154,8 +154,37 @@ struct VersionArgs {
     json: bool,
 }
 
+impl Cli {
+    fn wants_json(&self) -> bool {
+        match &self.command {
+            Commands::Sync(args) => args.json,
+            Commands::Doctor(args) => args.json,
+            Commands::Mappings(MappingsCommand {
+                command: MappingsSubcommand::Validate(args),
+            }) => args.json,
+            Commands::Version(args) => args.json,
+            Commands::Init(_) | Commands::Migrate(_) | Commands::Setup(_) => false,
+        }
+    }
+}
+
+impl Commands {
+    /// Classify file-writing commands before dispatch so every mutation shares
+    /// one repository lock, while all `--check` paths remain read-only.
+    fn mutates_files(&self) -> bool {
+        match self {
+            Self::Init(_) => true,
+            Self::Migrate(args) => !args.check,
+            Self::Setup(args) => !args.check,
+            Self::Sync(args) => !args.check,
+            Self::Doctor(_) | Self::Mappings(_) | Self::Version(_) => false,
+        }
+    }
+}
+
 fn main() {
     let cli = Cli::parse();
+    let json_output = cli.wants_json();
     match run(cli) {
         Ok(out) => {
             if !out.diagnostics.is_empty() {
@@ -167,8 +196,16 @@ fn main() {
             process::exit(out.exit().code());
         }
         Err(err) => {
-            eprintln!("error: {err:#}");
-            process::exit(classify_error(&err).code());
+            let exit = classify_error(&err);
+            if json_output {
+                match output::render_error(error_kind(&err), &format!("{err:#}"), exit.code()) {
+                    Ok(payload) => eprintln!("{payload}"),
+                    Err(render_error) => eprintln!("error: {err:#} (JSON error: {render_error})"),
+                }
+            } else {
+                eprintln!("error: {err:#}");
+            }
+            process::exit(exit.code());
         }
     }
 }
@@ -177,6 +214,16 @@ fn run(cli: Cli) -> Result<CommandOutput> {
     let root = config::find_root(cli.root.as_deref())?;
     let config_path = cli.config;
     let tools = cli.tool.as_deref().map(config::parse_tools).transpose()?;
+    if let Commands::Init(args) = &cli.command {
+        if let Some(raw) = args.tools.as_deref() {
+            config::parse_tools(raw)?;
+        }
+    }
+    let _repository_lock = if cli.command.mutates_files() {
+        Some(fs::RepositoryLock::acquire(&root)?)
+    } else {
+        None
+    };
     let tools_ref = tools.as_deref();
     let verbosity = Verbosity {
         verbose: cli.verbose || cli.debug,
@@ -185,9 +232,6 @@ fn run(cli: Cli) -> Result<CommandOutput> {
 
     let mut out = match cli.command {
         Commands::Init(args) => {
-            if let Some(raw) = args.tools.as_deref() {
-                config::parse_tools(raw)?;
-            }
             let mut out = init::run(&root, args.tools.as_deref(), args.force)?;
             add_basic_diagnostics(&mut out, verbosity, "init", &root);
             if verbosity.verbose {
@@ -560,7 +604,7 @@ fn display_path(root: &Path, path: &Path) -> String {
 fn version_output(json_output: bool) -> Result<CommandOutput> {
     let mut out = CommandOutput::default();
     if json_output {
-        out.push(serde_json::to_string_pretty(&serde_json::json!({
+        out.push(output::render_json(&serde_json::json!({
             "version": TOOL_VERSION,
             "commit": option_env!("GIT_SHA").unwrap_or("unknown"),
             "target": option_env!("TARGET").unwrap_or("unknown"),
@@ -595,11 +639,25 @@ fn version_output(json_output: bool) -> Result<CommandOutput> {
 }
 
 fn classify_error(err: &anyhow::Error) -> ExitCode {
-    match err.downcast_ref::<Error>() {
-        Some(Error::Config(_)) => ExitCode::Config,
-        Some(Error::Unsupported(_)) => ExitCode::Unsupported,
-        None => ExitCode::Io,
+    for cause in err.chain() {
+        match cause.downcast_ref::<Error>() {
+            Some(Error::Config(_)) => return ExitCode::Config,
+            Some(Error::Unsupported(_)) => return ExitCode::Unsupported,
+            None => {}
+        }
     }
+    ExitCode::Io
+}
+
+fn error_kind(err: &anyhow::Error) -> &'static str {
+    for cause in err.chain() {
+        match cause.downcast_ref::<Error>() {
+            Some(Error::Config(_)) => return "config",
+            Some(Error::Unsupported(_)) => return "unsupported",
+            None => {}
+        }
+    }
+    "io"
 }
 
 #[cfg(test)]
@@ -607,7 +665,7 @@ mod docs_tests {
     use std::{fs, path::Path};
 
     use anyhow::Result;
-    use clap::{Parser, error::ErrorKind};
+    use clap::{error::ErrorKind, Parser};
 
     use super::Cli;
 

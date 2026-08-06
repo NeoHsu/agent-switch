@@ -7,12 +7,12 @@ use serde::Serialize;
 use serde_json::json;
 
 use crate::{
-    CommandOutput, Error, ExitCode,
-    config::{self, CONFIG_FILE, Config},
+    config::{self, Config, CONFIG_FILE},
     fs::{abs, is_fake_symlink, relative_link, repo_path},
     manifest::{self, Manifest},
-    setup,
+    output, setup,
     sync::{self, SyncOptions},
+    CommandOutput, Error, ExitCode,
 };
 
 #[derive(Debug, Serialize)]
@@ -101,7 +101,7 @@ pub fn doctor_at(
     };
 
     if json_output {
-        out.push(serde_json::to_string_pretty(&json!({
+        out.push(output::render_json(&json!({
             "root": root.display().to_string(),
             "agents_dir": agents_exists,
             "agents_dir_path": repo_path(agents_dir),
@@ -269,7 +269,7 @@ pub fn doctor_config_error(
     let error = err.to_string();
 
     if json_output {
-        out.push(serde_json::to_string_pretty(&json!({
+        out.push(output::render_json(&json!({
             "root": root.display().to_string(),
             "config": false,
             "config_path": config_path,
@@ -300,7 +300,7 @@ pub fn validate_mappings(cfg: &Config, json_output: bool) -> Result<CommandOutpu
     config::validate_config(cfg)?;
     let mut out = CommandOutput::default();
     if json_output {
-        out.push(serde_json::to_string_pretty(&json!({
+        out.push(output::render_json(&json!({
             "valid": true,
             "version": cfg.version,
             "symlinks": cfg.symlinks.len(),
