@@ -54,22 +54,27 @@ crates/
 ├── agent-switch-cli/
 │   ├── build.rs                 build metadata: target, git SHA, build date
 │   ├── src/main.rs              clap CLI, exit-code mapping, command dispatch
+│   ├── src/invocation.rs        resolved root/config/tools, verbosity, mutation lock
+│   ├── src/operation.rs         command effect and output-mode classification
 │   └── tests/cli.rs             CLI integration tests
 └── agent-switch-core/
     ├── src/lib.rs               public modules, shared Error/ExitCode/CommandOutput
     ├── src/config.rs            config schema, defaults, path/tool validation
     ├── src/init.rs              `ags init`
-    ├── src/migrate.rs           native tool files -> canonical migration
+    ├── src/migrate/             migration orchestration and native-tool adapters
     ├── src/setup.rs             symlink/copy setup and prune
     ├── src/sync.rs              sync orchestration
     ├── src/sync/                sync plan, events, report, stages
     ├── src/formats/             markdown, copilot, opencode, codex adapters
-    ├── src/mcp.rs               MCP merge adapters
+    ├── src/mcp/                 MCP facade plus convert/import/merge/prune adapters
     ├── src/fs.rs                filesystem helpers, repository lock, and atomic writes
     ├── src/output.rs            versioned machine-readable CLI output
     ├── src/manifest.rs          sync manifest load/save/hash
     ├── src/diagnostics.rs       doctor and mapping validation
     └── src/tool.rs              Tool/Format/MergeFormat enums and ownership rules
+
+schema/
+└── cli-output-v1.json           shared machine-readable response contract
 ```
 
 `agent-switch-cli` 只負責 CLI 介面與 process exit。主要邏輯集中在 `agent-switch-core`，方便測試與未來重用。
@@ -118,6 +123,11 @@ Root discovery 順序：
 3. 找不到時使用 current directory
 
 Config 預設讀取 `.agent-switch.yaml`，也可用 `--config` 指定。
+
+每次 CLI invocation 先由 `operation::classify` 判斷是否會寫入檔案、是否要求
+JSON output，再由 `Invocation` 一次解析 root/config/tool filter、verbosity 與
+repository lock。command handlers 只接收這個已解析的 context，避免各 command
+自行重新推導執行目標。
 
 ## Config Schema and Validation
 
@@ -466,8 +476,9 @@ command 會在 dispatch 前取得 `.agent-switch.lock` 的 exclusive lock；
 
 ## Machine-readable Output Contract
 
-`output.rs` 集中處理 JSON response 的 envelope contract。所有 JSON object
-response 都以 additive `schemaVersion: 1` 開始；command-specific fields 維持
+`output.rs` 集中處理 JSON response 的 envelope contract；對應的 machine-readable
+schema 維護於 [`schema/cli-output-v1.json`](../schema/cli-output-v1.json)。所有
+JSON object response 都以 additive `schemaVersion: 1` 開始；command-specific fields 維持
 原有命名，讓 automation 能先驗證 schema 再解讀 payload。command report 之前
 發生的 runtime errors 會在 requested JSON mode 下輸出 versioned error object
 到 stderr；diagnostic reports 仍留在 stdout。
@@ -526,6 +537,7 @@ pattern 為 `v*`。
 - setup/prune/config validation：`crates/agent-switch-core/tests/setup.rs`
 - sync pipeline and JSON report：`crates/agent-switch-core/tests/sync.rs`
 - CLI exit/output integration：`crates/agent-switch-cli/tests/cli.rs`
+- machine-readable schema、lock 與 output contract：`crates/agent-switch-core/tests/contracts.rs`
 - README/docs command examples：CLI unit test 交給實際 Clap parser 驗證
 
 CI 預期執行：
@@ -536,6 +548,7 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo check --workspace --all-targets --locked      # MSRV toolchain
 cargo audit --deny warnings
 cargo test --workspace --locked                     # Linux, macOS, Windows
+cargo test --doc --workspace --locked
 ```
 
 ## Adding a New Tool or Format
@@ -546,7 +559,7 @@ cargo test --workspace --locked                     # Linux, macOS, Windows
 2. 若需要 generated adapter，在 `tool.rs` 新增 `Format` variant，實作 `Format::tool`。
 3. 在 `formats/` 新增或更新 adapter，並接到 `formats/mod.rs` 的 `export/import` match。
 4. 更新 `config.rs` 的 default mappings：`DEFAULT_SYMLINKS`、`DEFAULT_GENERATE` 或 `DEFAULT_MERGE`。
-5. 若需要 config merge，更新 `MergeFormat` 與 `mcp.rs` 或新增 merge module。
+5. 若需要 config merge，更新 `MergeFormat` 與 `mcp/` 下對應的 merge/import/convert adapter。
 6. 補 format round-trip test、sync integration test、tool filter test。
 7. 更新 README 與本文件。
 

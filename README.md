@@ -390,7 +390,8 @@ cargo test
 
 CI runs `cargo fmt --all --check`, Clippy with warnings denied, an MSRV
 `cargo check --workspace --all-targets --locked`, `cargo audit --deny warnings`,
-and `cargo test --workspace --locked` on Linux, macOS, and Windows. Tag pushes
+and `cargo test --workspace --locked` plus `cargo test --doc --workspace --locked`
+on Linux, macOS, and Windows. Tag pushes
 matching `v*` repeat format, lint, test, and audit verification before building
 release archives for Linux, macOS, and Windows.
 

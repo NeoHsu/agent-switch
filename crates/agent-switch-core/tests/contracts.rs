@@ -14,6 +14,15 @@ fn machine_output_is_versioned_without_changing_command_fields() {
 }
 
 #[test]
+fn checked_in_schema_matches_renderer_version() {
+    let schema: serde_json::Value =
+        serde_json::from_str(include_str!("../../../schema/cli-output-v1.json")).unwrap();
+
+    assert_eq!(schema["properties"]["schemaVersion"]["const"], 1);
+    assert_eq!(schema["required"][0], "schemaVersion");
+}
+
+#[test]
 fn repository_lock_is_released_for_the_next_invocation() {
     let temp = tempdir().unwrap();
     let lock_path = temp.path().join(repo_fs::REPOSITORY_LOCK_FILE);

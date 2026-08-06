@@ -3,11 +3,11 @@ use std::collections::HashSet;
 use anyhow::{Context, Result};
 use serde::Serialize;
 
-use crate::{output, CommandOutput, ExitCode};
+use crate::{CommandOutput, ExitCode, output};
 
 use super::{
-    event::{SyncEvent, SyncEventKind},
     SyncOptions,
+    event::{SyncEvent, SyncEventKind},
 };
 
 #[derive(Debug, Default)]

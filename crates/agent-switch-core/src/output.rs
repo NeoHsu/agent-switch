@@ -1,6 +1,6 @@
 //! Stable machine-readable output helpers shared by CLI commands.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use serde::Serialize;
 use serde_json::json;
 

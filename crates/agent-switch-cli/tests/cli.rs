@@ -42,10 +42,12 @@ fn doctor_json_reports_invalid_config() {
     assert_eq!(report["schemaVersion"], 1);
     assert_eq!(report["config"], false);
     assert_eq!(report["config_path"], ".agent-switch.yaml");
-    assert!(report["config_error"]
-        .as_str()
-        .unwrap()
-        .contains("unsupported config version: 999"));
+    assert!(
+        report["config_error"]
+            .as_str()
+            .unwrap()
+            .contains("unsupported config version: 999")
+    );
 }
 
 #[test]
@@ -167,13 +169,17 @@ fn version_json_reports_build_metadata() {
 
     assert_eq!(output.status.code(), Some(0));
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert!(report["rustc"]
-        .as_str()
-        .is_some_and(|value| !value.is_empty()));
+    assert!(
+        report["rustc"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty())
+    );
     assert_eq!(report["schemaVersion"], 1);
-    assert!(report["cargo_lock_sha256"]
-        .as_str()
-        .is_some_and(|value| value.len() == 64));
+    assert!(
+        report["cargo_lock_sha256"]
+            .as_str()
+            .is_some_and(|value| value.len() == 64)
+    );
 }
 
 #[test]
@@ -193,7 +199,9 @@ fn json_runtime_errors_use_versioned_stderr_envelope() {
     let report: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
     assert_eq!(report["schemaVersion"], 1);
     assert_eq!(report["error"]["kind"], "unsupported");
-    assert!(report["error"]["message"]
-        .as_str()
-        .is_some_and(|message| { message.contains("unsupported config version: 999") }));
+    assert!(
+        report["error"]["message"]
+            .as_str()
+            .is_some_and(|message| { message.contains("unsupported config version: 999") })
+    );
 }

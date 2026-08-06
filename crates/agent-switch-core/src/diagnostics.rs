@@ -7,12 +7,12 @@ use serde::Serialize;
 use serde_json::json;
 
 use crate::{
-    config::{self, Config, CONFIG_FILE},
+    CommandOutput, Error, ExitCode,
+    config::{self, CONFIG_FILE, Config},
     fs::{abs, is_fake_symlink, relative_link, repo_path},
     manifest::{self, Manifest},
     output, setup,
     sync::{self, SyncOptions},
-    CommandOutput, Error, ExitCode,
 };
 
 #[derive(Debug, Serialize)]

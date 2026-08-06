@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/NeoHsu/agent-switch/schema/cli-output-v1.json",
+  "title": "Agent Switch CLI output v1",
+  "description": "Shared envelope contract. Command-specific fields are additive and may vary by command.",
+  "type": "object",
+  "required": ["schemaVersion"],
+  "properties": {
+    "schemaVersion": {
+      "const": 1,
+      "type": "integer"
+    },
+    "error": {
+      "type": "object",
+      "required": ["kind", "message", "exit_code"],
+      "properties": {
+        "kind": { "type": "string" },
+        "message": { "type": "string" },
+        "exit_code": { "type": "integer" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

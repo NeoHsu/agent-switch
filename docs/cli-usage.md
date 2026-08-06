@@ -42,7 +42,8 @@ common options consistently before or after subcommands.
 
 Verbose and debug diagnostics are written to stderr, so JSON stdout remains
 machine-readable. Every JSON object response includes additive `schemaVersion: 1`;
-the command-specific fields remain stable. Runtime failures before a command
+the command-specific fields remain stable. The shared contract is versioned in
+[`schema/cli-output-v1.json`](../schema/cli-output-v1.json). Runtime failures before a command
 report are rendered as versioned error objects on stderr; diagnostic reports stay
 on stdout.
 
