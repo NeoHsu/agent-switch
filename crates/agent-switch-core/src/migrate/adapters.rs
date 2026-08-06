@@ -1,4 +1,4 @@
-//! Migration command implementation for importing existing native tool files.
+//! Native-tool migration adapters and filesystem reconciliation helpers.
 
 use std::{
     collections::BTreeSet,
@@ -11,125 +11,17 @@ use serde_json::{Map as JsonMap, Value, json};
 use walkdir::WalkDir;
 
 use crate::{
-    CommandOutput, Error, ExitCode,
+    CommandOutput, Error,
     config::{self, Config, GenerateSpec, SymlinkDetail, SymlinkSpec, write_config},
     formats,
     fs::{atomic_write, io_error, is_fake_symlink, read_text, repo_path, write_if_changed},
-    init, mcp,
-    setup::{self, SetupOptions},
+    mcp,
     tool::Tool,
 };
 
-#[derive(Debug, Clone, Copy, Default)]
-pub struct MigrateOptions {
-    /// Report what would change without writing files.
-    pub check: bool,
-    /// Overwrite conflicting canonical files when safe merge is not possible.
-    pub force: bool,
-    /// Keep existing native files/directories in place, and skip automatic setup.
-    pub keep_native: bool,
-    /// Skip the final setup/sync pass after imports and backups.
-    pub no_setup: bool,
-}
+use super::{ImportOutcome, LEGACY_IMPORT_LINKS, MigrateOptions};
 
-#[derive(Debug, Clone, Copy, Default)]
-struct ImportOutcome {
-    changed: bool,
-    skipped: bool,
-}
-
-const LEGACY_IMPORT_LINKS: &[(&str, &str, Tool)] = &[
-    (".pi/skills", "skills", Tool::Pi),
-    (".agent/rules", "rules", Tool::Antigravity),
-    (".agent/skills", "skills", Tool::Antigravity),
-];
-
-pub fn run(
-    root: &Path,
-    explicit_config: Option<&Path>,
-    tools: Option<&[Tool]>,
-    opts: MigrateOptions,
-) -> Result<CommandOutput> {
-    let mut out = CommandOutput::default();
-    let mut drift = false;
-    let mut skipped = false;
-
-    let (cfg, config_created) = ensure_config(root, explicit_config, tools, opts.check, &mut out)?;
-    drift |= config_created;
-
-    drift |= ensure_canonical_dirs(root, &cfg, opts.check, &mut out)?;
-
-    let generated_outcome = import_generated_sources(root, &cfg, tools, opts, &mut out)?;
-    drift |= generated_outcome.changed || generated_outcome.skipped;
-    skipped |= generated_outcome.skipped;
-    let mut native_paths_to_backup = BTreeSet::new();
-    let import_cfg = with_legacy_import_links(&cfg);
-    let symlink_outcome = import_symlink_sources(
-        root,
-        &import_cfg,
-        tools,
-        opts,
-        &mut native_paths_to_backup,
-        &mut out,
-    )?;
-    drift |= symlink_outcome.changed || symlink_outcome.skipped;
-    skipped |= symlink_outcome.skipped;
-    queue_managed_legacy_links_for_backup(root, &cfg, tools, &mut native_paths_to_backup);
-    let merge_outcome = import_merge_sources(root, &cfg, tools, opts, &mut out)?;
-    drift |= merge_outcome.changed || merge_outcome.skipped;
-    skipped |= merge_outcome.skipped;
-    let legacy_copilot_outcome = import_legacy_copilot_mcp(
-        root,
-        &cfg,
-        tools,
-        opts,
-        &mut native_paths_to_backup,
-        &mut out,
-    )?;
-    drift |= legacy_copilot_outcome.changed || legacy_copilot_outcome.skipped;
-    skipped |= legacy_copilot_outcome.skipped;
-
-    if !opts.keep_native {
-        drift |= backup_native_paths(root, &native_paths_to_backup, opts.check, &mut out)?;
-    }
-
-    if !opts.check {
-        init::update_gitignore_for_config(root, &cfg, &mut out)?;
-    }
-
-    if !opts.no_setup && !opts.keep_native {
-        let setup_out = setup::run(
-            root,
-            &cfg,
-            tools,
-            SetupOptions {
-                no_sync: false,
-                check: opts.check,
-                force: opts.force,
-                prune: false,
-            },
-        )?;
-        if setup_out.exit() == ExitCode::Drift {
-            drift = true;
-        }
-        out.lines.extend(setup_out.lines);
-        out.exit = setup_out.exit;
-    }
-
-    if opts.check {
-        if drift {
-            out.exit = Some(ExitCode::Drift);
-        }
-    } else if skipped && out.exit() != ExitCode::Drift {
-        // Imports were left unreconciled (conflicts kept without --force); surface
-        // this through the exit code even when the setup pass itself is clean.
-        out.exit = Some(ExitCode::Drift);
-    }
-
-    Ok(out)
-}
-
-fn ensure_config(
+pub(super) fn ensure_config(
     root: &Path,
     explicit_config: Option<&Path>,
     tools: Option<&[Tool]>,
@@ -163,7 +55,7 @@ fn filtered_default_config(tools: Option<&[Tool]>) -> Config {
     cfg
 }
 
-fn with_legacy_import_links(cfg: &Config) -> Config {
+pub(super) fn with_legacy_import_links(cfg: &Config) -> Config {
     let mut import_cfg = cfg.clone();
     for &(link, target, tool) in LEGACY_IMPORT_LINKS {
         let target = import_cfg.agents_dir.join(target);
@@ -178,7 +70,7 @@ fn with_legacy_import_links(cfg: &Config) -> Config {
     import_cfg
 }
 
-fn queue_managed_legacy_links_for_backup(
+pub(super) fn queue_managed_legacy_links_for_backup(
     root: &Path,
     cfg: &Config,
     tools: Option<&[Tool]>,
@@ -201,7 +93,7 @@ fn queue_managed_legacy_links_for_backup(
     }
 }
 
-fn ensure_canonical_dirs(
+pub(super) fn ensure_canonical_dirs(
     root: &Path,
     cfg: &Config,
     check: bool,
@@ -227,7 +119,7 @@ fn ensure_canonical_dirs(
     Ok(changed)
 }
 
-fn import_symlink_sources(
+pub(super) fn import_symlink_sources(
     root: &Path,
     cfg: &Config,
     tools: Option<&[Tool]>,
@@ -318,7 +210,7 @@ fn import_symlink_sources(
     Ok(outcome)
 }
 
-fn import_generated_sources(
+pub(super) fn import_generated_sources(
     root: &Path,
     cfg: &Config,
     tools: Option<&[Tool]>,
@@ -390,7 +282,7 @@ fn generated_canonical_path(spec: &GenerateSpec, rel_to_native_root: &Path) -> O
     Some(spec.from.join(rel))
 }
 
-fn import_merge_sources(
+pub(super) fn import_merge_sources(
     root: &Path,
     cfg: &Config,
     tools: Option<&[Tool]>,
@@ -418,7 +310,7 @@ fn import_merge_sources(
     Ok(outcome)
 }
 
-fn import_legacy_copilot_mcp(
+pub(super) fn import_legacy_copilot_mcp(
     root: &Path,
     cfg: &Config,
     tools: Option<&[Tool]>,
@@ -845,7 +737,7 @@ fn read_json_mcp_file(path: &Path) -> Result<Value> {
     Ok(value)
 }
 
-fn backup_native_paths(
+pub(super) fn backup_native_paths(
     root: &Path,
     native_paths: &BTreeSet<PathBuf>,
     check: bool,
