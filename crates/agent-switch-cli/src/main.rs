@@ -4,11 +4,16 @@ use std::{
 };
 
 use agent_switch_core::{
-    config, diagnostics, fs, init, migrate, output, setup, sync, tool::Tool, CommandOutput, Error,
-    ExitCode, TOOL_VERSION,
+    CommandOutput, Error, ExitCode, TOOL_VERSION, config, diagnostics, fs, init, migrate, output,
+    setup, sync, tool::Tool,
 };
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
+
+mod invocation;
+mod operation;
+
+use invocation::{Invocation, Verbosity};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -154,37 +159,9 @@ struct VersionArgs {
     json: bool,
 }
 
-impl Cli {
-    fn wants_json(&self) -> bool {
-        match &self.command {
-            Commands::Sync(args) => args.json,
-            Commands::Doctor(args) => args.json,
-            Commands::Mappings(MappingsCommand {
-                command: MappingsSubcommand::Validate(args),
-            }) => args.json,
-            Commands::Version(args) => args.json,
-            Commands::Init(_) | Commands::Migrate(_) | Commands::Setup(_) => false,
-        }
-    }
-}
-
-impl Commands {
-    /// Classify file-writing commands before dispatch so every mutation shares
-    /// one repository lock, while all `--check` paths remain read-only.
-    fn mutates_files(&self) -> bool {
-        match self {
-            Self::Init(_) => true,
-            Self::Migrate(args) => !args.check,
-            Self::Setup(args) => !args.check,
-            Self::Sync(args) => !args.check,
-            Self::Doctor(_) | Self::Mappings(_) | Self::Version(_) => false,
-        }
-    }
-}
-
 fn main() {
     let cli = Cli::parse();
-    let json_output = cli.wants_json();
+    let json_output = operation::classify(&cli.command).json_output;
     match run(cli) {
         Ok(out) => {
             if !out.diagnostics.is_empty() {
@@ -211,29 +188,29 @@ fn main() {
 }
 
 fn run(cli: Cli) -> Result<CommandOutput> {
-    let root = config::find_root(cli.root.as_deref())?;
-    let config_path = cli.config;
-    let tools = cli.tool.as_deref().map(config::parse_tools).transpose()?;
-    if let Commands::Init(args) = &cli.command {
-        if let Some(raw) = args.tools.as_deref() {
-            config::parse_tools(raw)?;
-        }
-    }
-    let _repository_lock = if cli.command.mutates_files() {
-        Some(fs::RepositoryLock::acquire(&root)?)
-    } else {
-        None
+    let effect = operation::classify(&cli.command);
+    let init_tools = match &cli.command {
+        Commands::Init(args) => args.tools.as_deref(),
+        _ => None,
     };
-    let tools_ref = tools.as_deref();
-    let verbosity = Verbosity {
-        verbose: cli.verbose || cli.debug,
-        debug: cli.debug,
-    };
+    let invocation = Invocation::from_cli(
+        cli.root.as_deref(),
+        cli.config,
+        cli.tool.as_deref(),
+        init_tools,
+        effect.mutates_files,
+        cli.verbose,
+        cli.debug,
+    )?;
+    let root = invocation.root.as_path();
+    let config_path = invocation.config_path_arg();
+    let tools_ref = invocation.tools();
+    let verbosity = invocation.verbosity;
 
     let mut out = match cli.command {
         Commands::Init(args) => {
-            let mut out = init::run(&root, args.tools.as_deref(), args.force)?;
-            add_basic_diagnostics(&mut out, verbosity, "init", &root);
+            let mut out = init::run(root, args.tools.as_deref(), args.force)?;
+            add_basic_diagnostics(&mut out, verbosity, "init", root);
             if verbosity.verbose {
                 out.diagnostic(format!(
                     "verbose: init tools: {}",
@@ -244,8 +221,8 @@ fn run(cli: Cli) -> Result<CommandOutput> {
         }
         Commands::Migrate(args) => {
             let mut out = migrate::run(
-                &root,
-                config_path.as_deref(),
+                root,
+                config_path,
                 tools_ref,
                 migrate::MigrateOptions {
                     check: args.check,
@@ -254,11 +231,9 @@ fn run(cli: Cli) -> Result<CommandOutput> {
                     no_setup: args.no_setup,
                 },
             )?;
-            let loaded_config_path = config::resolve_config_path(&root, config_path.as_deref());
+            let loaded_config_path = invocation.config_path();
             let cfg = if loaded_config_path.exists() {
-                config::load_config(&root, config_path.as_deref())
-                    .ok()
-                    .map(|(cfg, _)| cfg)
+                invocation.load_config().ok().map(|(cfg, _)| cfg)
             } else {
                 None
             };
@@ -267,21 +242,21 @@ fn run(cli: Cli) -> Result<CommandOutput> {
                     &mut out,
                     verbosity,
                     "migrate",
-                    &root,
+                    root,
                     &loaded_config_path,
                     cfg,
                     tools_ref,
                 );
             } else {
-                add_basic_diagnostics(&mut out, verbosity, "migrate", &root);
+                add_basic_diagnostics(&mut out, verbosity, "migrate", root);
             }
             add_migrate_diagnostics(&mut out, verbosity, &args);
             out
         }
         Commands::Setup(args) => {
-            let (cfg, loaded_config_path) = config::load_config(&root, config_path.as_deref())?;
+            let (cfg, loaded_config_path) = invocation.load_config()?;
             let mut out = setup::run(
-                &root,
+                root,
                 &cfg,
                 tools_ref,
                 setup::SetupOptions {
@@ -295,7 +270,7 @@ fn run(cli: Cli) -> Result<CommandOutput> {
                 &mut out,
                 verbosity,
                 "setup",
-                &root,
+                root,
                 &loaded_config_path,
                 &cfg,
                 tools_ref,
@@ -304,7 +279,7 @@ fn run(cli: Cli) -> Result<CommandOutput> {
             out
         }
         Commands::Sync(args) => {
-            let (cfg, loaded_config_path) = config::load_config(&root, config_path.as_deref())?;
+            let (cfg, loaded_config_path) = invocation.load_config()?;
             let event_filter = if args.event_filter.is_empty() {
                 None
             } else {
@@ -312,7 +287,7 @@ fn run(cli: Cli) -> Result<CommandOutput> {
             };
 
             let mut out = sync::run(
-                &root,
+                root,
                 &cfg,
                 tools_ref,
                 sync::SyncOptions {
@@ -328,7 +303,7 @@ fn run(cli: Cli) -> Result<CommandOutput> {
                 &mut out,
                 verbosity,
                 "sync",
-                &root,
+                root,
                 &loaded_config_path,
                 &cfg,
                 tools_ref,
@@ -337,19 +312,19 @@ fn run(cli: Cli) -> Result<CommandOutput> {
             out
         }
         Commands::Doctor(args) => {
-            let path = config::resolve_config_path(&root, config_path.as_deref());
+            let path = invocation.config_path();
             let cfg = if path.exists() || config_path.is_some() {
-                match config::load_config(&root, config_path.as_deref()) {
+                match invocation.load_config() {
                     Ok((cfg, _)) => Some(cfg),
                     Err(err) => {
-                        return diagnostics::doctor_config_error(&root, &path, &err, args.json);
+                        return diagnostics::doctor_config_error(root, &path, &err, args.json);
                     }
                 }
             } else {
                 None
             };
-            let mut out = diagnostics::doctor_at(&root, cfg.as_ref(), &path, args.json)?;
-            add_basic_diagnostics(&mut out, verbosity, "doctor", &root);
+            let mut out = diagnostics::doctor_at(root, cfg.as_ref(), &path, args.json)?;
+            add_basic_diagnostics(&mut out, verbosity, "doctor", root);
             if let Some(cfg) = cfg.as_ref() {
                 add_config_selection_diagnostics(&mut out, verbosity, cfg, tools_ref);
             }
@@ -357,13 +332,13 @@ fn run(cli: Cli) -> Result<CommandOutput> {
         }
         Commands::Mappings(cmd) => match cmd.command {
             MappingsSubcommand::Validate(args) => {
-                let (cfg, loaded_config_path) = config::load_config(&root, config_path.as_deref())?;
+                let (cfg, loaded_config_path) = invocation.load_config()?;
                 let mut out = diagnostics::validate_mappings(&cfg, args.json)?;
                 add_config_diagnostics(
                     &mut out,
                     verbosity,
                     "mappings validate",
-                    &root,
+                    root,
                     &loaded_config_path,
                     &cfg,
                     tools_ref,
@@ -373,7 +348,7 @@ fn run(cli: Cli) -> Result<CommandOutput> {
         },
         Commands::Version(args) => {
             let mut out = version_output(args.json)?;
-            add_basic_diagnostics(&mut out, verbosity, "version", &root);
+            add_basic_diagnostics(&mut out, verbosity, "version", root);
             out
         }
     };
@@ -382,12 +357,6 @@ fn run(cli: Cli) -> Result<CommandOutput> {
         out.lines.clear();
     }
     Ok(out)
-}
-
-#[derive(Debug, Clone, Copy)]
-struct Verbosity {
-    verbose: bool,
-    debug: bool,
 }
 
 fn add_basic_diagnostics(
@@ -665,7 +634,7 @@ mod docs_tests {
     use std::{fs, path::Path};
 
     use anyhow::Result;
-    use clap::{error::ErrorKind, Parser};
+    use clap::{Parser, error::ErrorKind};
 
     use super::Cli;
 
