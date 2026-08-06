@@ -79,33 +79,41 @@ pub struct RepositoryOperation {
     recovered: Option<OperationRecord>,
 }
 
+/// Read the interrupted-operation journal without creating or changing it.
+pub fn read_operation_record(root: &Path) -> Result<Option<OperationRecord>> {
+    let path = root.join(REPOSITORY_OPERATION_FILE);
+    ensure_regular_state_path(&path, "repository operation journal")?;
+    match fs::symlink_metadata(&path) {
+        Ok(_) => parse_operation_record(&path).map(Some),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(io_error("inspect repository operation journal", &path, err)),
+    }
+}
+
+fn parse_operation_record(path: &Path) -> Result<OperationRecord> {
+    let content =
+        read_text(path).map_err(|err| io_error("read repository operation journal", path, err))?;
+    let record: OperationRecord = serde_json::from_str(&content).map_err(|err| {
+        anyhow::anyhow!(
+            "repository operation journal is not parseable: {}: {err}",
+            path.display()
+        )
+    })?;
+    if record.schema_version != OPERATION_SCHEMA_VERSION {
+        return Err(anyhow::anyhow!(
+            "unsupported repository operation journal version {}: {}",
+            record.schema_version,
+            path.display()
+        ));
+    }
+    Ok(record)
+}
+
 impl RepositoryOperation {
     /// Start a journaled repository operation after the repository lock is held.
     pub fn begin(root: &Path, command: &str) -> Result<Self> {
         let path = root.join(REPOSITORY_OPERATION_FILE);
-        ensure_regular_state_path(&path, "repository operation journal")?;
-        let recovered = match fs::symlink_metadata(&path) {
-            Ok(_) => {
-                let content = read_text(&path)
-                    .map_err(|err| io_error("read repository operation journal", &path, err))?;
-                let record: OperationRecord = serde_json::from_str(&content).map_err(|err| {
-                    anyhow::anyhow!(
-                        "repository operation journal is not parseable: {}: {err}",
-                        path.display()
-                    )
-                })?;
-                if record.schema_version != OPERATION_SCHEMA_VERSION {
-                    return Err(anyhow::anyhow!(
-                        "unsupported repository operation journal version {}: {}",
-                        record.schema_version,
-                        path.display()
-                    ));
-                }
-                Some(record)
-            }
-            Err(err) if err.kind() == io::ErrorKind::NotFound => None,
-            Err(err) => return Err(io_error("inspect repository operation journal", &path, err)),
-        };
+        let recovered = read_operation_record(root)?;
         let record = OperationRecord {
             schema_version: OPERATION_SCHEMA_VERSION,
             command: command.to_string(),

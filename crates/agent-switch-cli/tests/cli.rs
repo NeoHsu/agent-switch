@@ -188,6 +188,17 @@ fn interrupted_mutation_is_recovered_on_next_successful_mutation() {
     assert_eq!(failed.status.code(), Some(4));
     assert!(root.join(REPOSITORY_OPERATION_FILE).is_file());
 
+    let doctor = Command::new(env!("CARGO_BIN_EXE_ags"))
+        .arg("--root")
+        .arg(root)
+        .arg("doctor")
+        .arg("--json")
+        .output()
+        .unwrap();
+    let doctor_report: serde_json::Value = serde_json::from_slice(&doctor.stdout).unwrap();
+    assert_eq!(doctor_report["operation_journal"]["present"], true);
+    assert_eq!(doctor_report["operation_journal"]["command"], "sync");
+
     fs::remove_file(root.join(".agent-switch.yaml")).unwrap();
     let recovered = Command::new(env!("CARGO_BIN_EXE_ags"))
         .arg("--root")

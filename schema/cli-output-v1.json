@@ -19,6 +19,18 @@
         "exit_code": { "type": "integer" }
       },
       "additionalProperties": true
+    },
+    "operation_journal": {
+      "type": "object",
+      "required": ["path", "present", "command", "pid", "started_at_unix_secs"],
+      "properties": {
+        "path": { "type": "string" },
+        "present": { "type": "boolean" },
+        "command": { "type": ["string", "null"] },
+        "pid": { "type": ["integer", "null"] },
+        "started_at_unix_secs": { "type": ["integer", "null"] }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": true

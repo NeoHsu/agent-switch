@@ -1,6 +1,6 @@
 use std::fs;
 
-use agent_switch_core::{fs as repo_fs, init, output};
+use agent_switch_core::{diagnostics, fs as repo_fs, init, output};
 use serde_json::json;
 use tempfile::tempdir;
 
@@ -20,6 +20,10 @@ fn checked_in_schema_matches_renderer_version() {
 
     assert_eq!(schema["properties"]["schemaVersion"]["const"], 1);
     assert_eq!(schema["required"][0], "schemaVersion");
+    assert_eq!(
+        schema["properties"]["operation_journal"]["properties"]["present"]["type"],
+        "boolean"
+    );
 }
 
 #[test]
@@ -64,6 +68,26 @@ fn repository_operation_rejects_non_regular_journal_path() {
             .to_string()
             .contains("unsafe repository operation journal path")
     );
+}
+
+#[test]
+fn doctor_reports_interrupted_operation_journal() {
+    let temp = tempdir().unwrap();
+    let operation = repo_fs::RepositoryOperation::begin(temp.path(), "sync").unwrap();
+    drop(operation);
+
+    let out = diagnostics::doctor_at(
+        temp.path(),
+        None,
+        &temp.path().join(".agent-switch.yaml"),
+        true,
+    )
+    .unwrap();
+    let report: serde_json::Value = serde_json::from_str(&out.lines[0]).unwrap();
+
+    assert_eq!(report["operation_journal"]["present"], true);
+    assert_eq!(report["operation_journal"]["command"], "sync");
+    assert_eq!(report["drift"], true);
 }
 
 #[test]

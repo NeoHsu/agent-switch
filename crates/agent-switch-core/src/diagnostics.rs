@@ -9,7 +9,10 @@ use serde_json::json;
 use crate::{
     CommandOutput, Error, ExitCode,
     config::{self, CONFIG_FILE, Config},
-    fs::{abs, is_fake_symlink, relative_link, repo_path},
+    fs::{
+        OperationRecord, REPOSITORY_OPERATION_FILE, abs, is_fake_symlink, read_operation_record,
+        relative_link, repo_path,
+    },
     manifest::{self, Manifest},
     output, setup,
     sync::{self, SyncOptions},
@@ -62,7 +65,8 @@ pub fn doctor_at(
         None
     };
 
-    let mut drift = !agents_exists || !config_exists || !manifest_ok;
+    let operation = read_operation_record(root)?;
+    let mut drift = !agents_exists || !config_exists || !manifest_ok || operation.is_some();
     let mut links = Vec::new();
     if let Some(cfg) = cfg {
         for (link, spec) in &cfg.symlinks {
@@ -113,6 +117,7 @@ pub fn doctor_at(
             "manifest_path": manifest_path_display,
             "manifest_error": manifest_error.as_deref(),
             "manifest_recovery": manifest_recovery,
+            "operation_journal": operation_journal_json(operation.as_ref()),
             "links": links,
             "generated_files_in_sync": generated_files_in_sync,
             "drift": drift,
@@ -148,6 +153,16 @@ pub fn doctor_at(
         out.push("hint:    run `ags sync --reset-manifest` to rebuild it");
     } else {
         out.push("ok       manifest parseable");
+    }
+
+    if let Some(record) = operation.as_ref() {
+        out.push(format!(
+            "warning: interrupted operation journal: {} (pid {})",
+            record.command, record.pid
+        ));
+        out.push("hint:    rerun a mutating command to reconcile the repository");
+    } else {
+        out.push("ok       operation journal clear");
     }
 
     for link in &links {
@@ -267,6 +282,7 @@ pub fn doctor_config_error(
     };
     let config_path = display_path(root, config_path);
     let error = err.to_string();
+    let operation = read_operation_record(root).ok().flatten();
 
     if json_output {
         out.push(output::render_json(&json!({
@@ -274,13 +290,30 @@ pub fn doctor_config_error(
             "config": false,
             "config_path": config_path,
             "config_error": error,
+            "operation_journal": operation_journal_json(operation.as_ref()),
         }))?);
     } else {
         out.push(format!("ok       root: {}", root.display()));
         out.push(format!("error:   {config_path}: {error}"));
+        if let Some(record) = operation.as_ref() {
+            out.push(format!(
+                "warning: interrupted operation journal: {} (pid {})",
+                record.command, record.pid
+            ));
+        }
     }
 
     Ok(out)
+}
+
+fn operation_journal_json(record: Option<&OperationRecord>) -> serde_json::Value {
+    json!({
+        "path": REPOSITORY_OPERATION_FILE,
+        "present": record.is_some(),
+        "command": record.map(|value| value.command.as_str()),
+        "pid": record.map(|value| value.pid),
+        "started_at_unix_secs": record.map(|value| value.started_at_unix_secs),
+    })
 }
 
 fn exit_for_config_error(err: &anyhow::Error) -> ExitCode {
