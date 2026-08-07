@@ -13,10 +13,8 @@ For canonical `.agents/` file conventions and frontmatter examples, see
 
 ## Install
 
-Download a prebuilt archive for Linux x86_64, macOS Apple Silicon or Intel,
-or Windows x86_64 from the
+Download an available prebuilt archive for Linux, macOS, or Windows from the
 [latest GitHub release](https://github.com/NeoHsu/agent-switch/releases/latest).
-Linux releases use a static musl build for compatibility across distributions.
 Verify downloaded archives against the release's `SHA256SUMS` file, or build
 from source with Rust 1.85 or newer:
 
