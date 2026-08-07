@@ -346,8 +346,10 @@ and then running `ags sync` is equivalent. If a process is interrupted during a
 mutation, rerun the same or another mutating command; the stale operation journal is
 recognized under the repository lock and reported as a warning. `ags doctor --json`
 exposes the same state in `operation_journal` (`present`, `command`, `pid`, and
-`started_at_unix_secs`). Permission errors
-include the attempted action and path, for example creating a parent directory,
+`started_at_unix_secs`). If an invalid config and an unreadable or malformed
+journal are present together, `operation_journal_error` preserves the secondary
+diagnostic without hiding the config error. Permission errors include the attempted
+action and path, for example creating a parent directory,
 creating a symlink, or replacing a generated file.
 
 ## Version Metadata

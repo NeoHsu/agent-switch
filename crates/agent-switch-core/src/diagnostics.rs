@@ -281,21 +281,29 @@ pub fn doctor_config_error(
         ..CommandOutput::default()
     };
     let config_path = display_path(root, config_path);
-    let error = err.to_string();
-    let operation = read_operation_record(root).ok().flatten();
+    let config_error = err.to_string();
+    let (operation, operation_journal_error) = match read_operation_record(root) {
+        Ok(record) => (record, None),
+        Err(err) => (None, Some(err.to_string())),
+    };
 
     if json_output {
         out.push(output::render_json(&json!({
             "root": root.display().to_string(),
             "config": false,
             "config_path": config_path,
-            "config_error": error,
+            "config_error": config_error,
             "operation_journal": operation_journal_json(operation.as_ref()),
+            "operation_journal_error": operation_journal_error.as_deref(),
         }))?);
     } else {
         out.push(format!("ok       root: {}", root.display()));
-        out.push(format!("error:   {config_path}: {error}"));
-        if let Some(record) = operation.as_ref() {
+        out.push(format!("error:   {config_path}: {config_error}"));
+        if let Some(err) = operation_journal_error.as_deref() {
+            out.push(format!(
+                "warning: repository operation journal could not be inspected: {err}"
+            ));
+        } else if let Some(record) = operation.as_ref() {
             out.push(format!(
                 "warning: interrupted operation journal: {} (pid {})",
                 record.command, record.pid

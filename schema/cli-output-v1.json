@@ -31,6 +31,9 @@
         "started_at_unix_secs": { "type": ["integer", "null"] }
       },
       "additionalProperties": false
+    },
+    "operation_journal_error": {
+      "type": ["string", "null"]
     }
   },
   "additionalProperties": true

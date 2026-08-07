@@ -29,6 +29,7 @@ fn doctor_json_reports_invalid_config() {
     let temp = tempdir().unwrap();
     let root = temp.path();
     fs::write(root.join(".agent-switch.yaml"), "version: 999\n").unwrap();
+    fs::write(root.join(REPOSITORY_OPERATION_FILE), "{not json\n").unwrap();
 
     let output = Command::new(env!("CARGO_BIN_EXE_ags"))
         .arg("--root")
@@ -48,6 +49,15 @@ fn doctor_json_reports_invalid_config() {
             .as_str()
             .unwrap()
             .contains("unsupported config version: 999")
+    );
+    assert!(
+        report["operation_journal_error"]
+            .as_str()
+            .is_some_and(|error| error.contains("operation journal is not parseable"))
+    );
+    assert_eq!(
+        fs::read_to_string(root.join(REPOSITORY_OPERATION_FILE)).unwrap(),
+        "{not json\n"
     );
 }
 

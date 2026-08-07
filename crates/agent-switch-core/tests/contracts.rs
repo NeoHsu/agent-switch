@@ -24,6 +24,10 @@ fn checked_in_schema_matches_renderer_version() {
         schema["properties"]["operation_journal"]["properties"]["present"]["type"],
         "boolean"
     );
+    assert_eq!(
+        schema["properties"]["operation_journal_error"]["type"],
+        json!(["string", "null"])
+    );
 }
 
 #[test]
@@ -88,6 +92,33 @@ fn doctor_reports_interrupted_operation_journal() {
     assert_eq!(report["operation_journal"]["present"], true);
     assert_eq!(report["operation_journal"]["command"], "sync");
     assert_eq!(report["drift"], true);
+}
+
+#[test]
+fn doctor_config_error_reports_malformed_operation_journal() {
+    let temp = tempdir().unwrap();
+    fs::write(
+        temp.path().join(repo_fs::REPOSITORY_OPERATION_FILE),
+        "{not json\n",
+    )
+    .unwrap();
+
+    let config_error = anyhow::anyhow!("invalid config");
+    let out = diagnostics::doctor_config_error(
+        temp.path(),
+        &temp.path().join(".agent-switch.yaml"),
+        &config_error,
+        true,
+    )
+    .unwrap();
+    let report: serde_json::Value = serde_json::from_str(&out.lines[0]).unwrap();
+
+    assert_eq!(report["operation_journal"]["present"], false);
+    assert!(
+        report["operation_journal_error"]
+            .as_str()
+            .is_some_and(|error| error.contains("operation journal is not parseable"))
+    );
 }
 
 #[test]
