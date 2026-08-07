@@ -13,9 +13,12 @@ For canonical `.agents/` file conventions and frontmatter examples, see
 
 ## Install
 
-Download a prebuilt archive for Linux, macOS, or Windows from the
-[latest GitHub release](https://github.com/NeoHsu/agent-switch/releases/latest),
-or build from source with Rust 1.85 or newer:
+Download a prebuilt archive for Linux x86_64, macOS Apple Silicon or Intel,
+or Windows x86_64 from the
+[latest GitHub release](https://github.com/NeoHsu/agent-switch/releases/latest).
+Linux releases use a static musl build for compatibility across distributions.
+Verify downloaded archives against the release's `SHA256SUMS` file, or build
+from source with Rust 1.85 or newer:
 
 ```bash
 cargo build --release -p agent-switch-cli
@@ -356,8 +359,10 @@ target/release/ags
 
 See [Install](#install) for platform-specific installation guidance.
 
-Release builds in CI use explicit target triples for Linux, macOS, and Windows
-so archive names match the binaries they contain.
+Release builds in CI use explicit target triples for static Linux x86_64,
+macOS Apple Silicon and Intel, and Windows x86_64. The tag must match the Cargo
+package version; a single publish job generates checksums and release notes after
+all platform builds succeed.
 
 ## Exit Codes
 
@@ -388,12 +393,12 @@ fields are fixed for scripts and CI machines.
 cargo test
 ```
 
-CI runs `cargo fmt --all --check`, Clippy with warnings denied, an MSRV
-`cargo check --workspace --all-targets --locked`, `cargo audit --deny warnings`,
-and `cargo test --workspace --locked` plus `cargo test --doc --workspace --locked`
-on Linux, macOS, and Windows. Tag pushes
-matching `v*` repeat format, lint, test, and audit verification before building
-release archives for Linux, macOS, and Windows.
+CI runs actionlint, `cargo fmt --all --check`, Clippy with warnings denied, an
+MSRV `cargo check --workspace --all-targets --locked`, `cargo audit --deny warnings`,
+and `cargo test --workspace --locked` (including doctests) on Linux, macOS, and
+Windows. Tag pushes matching `v*` repeat verification before building release
+archives. Maintainers can run the Release workflow manually to test every build
+without publishing a GitHub release.
 
 ## License
 

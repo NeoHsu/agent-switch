@@ -531,9 +531,13 @@ Unsupported。
 2. reproducible build 用的 `SOURCE_DATE_EPOCH`
 3. fallback 到目前 UTC epoch 轉出的 ISO-8601 字串
 
-Release workflow 在任何 artifact build 前先執行 fmt、clippy、完整測試與
-`cargo audit`，再針對 Linux/macOS/Windows target build archive；tag
-pattern 為 `v*`。
+Release workflow 在任何 artifact build 前先執行 actionlint、fmt、clippy、
+完整測試與 `cargo audit`，並拒絕與 Cargo package version 不一致的 tag。
+Matrix 會建立 static musl Linux x86_64、macOS Apple Silicon/Intel 與 Windows
+x86_64 archive；各 build 只上傳 workflow artifact，最後由單一 publish job
+產生 `SHA256SUMS`、release notes 並發布，避免 concurrent release upload race。
+Tag pattern 為 `v*`；`workflow_dispatch` 可完整測試 build pipeline，但會略過
+publish job。
 
 ## Testing and CI
 
@@ -553,8 +557,8 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo check --workspace --all-targets --locked      # MSRV toolchain
 cargo audit --deny warnings
-cargo test --workspace --locked                     # Linux, macOS, Windows
-cargo test --doc --workspace --locked
+actionlint                                          # GitHub Actions workflows
+cargo test --workspace --locked                     # 含 doctests；Linux/macOS/Windows
 ```
 
 ## Adding a New Tool or Format
