@@ -151,7 +151,7 @@ pub(crate) fn classify(command: &Commands) -> CommandEffect {
 
 #[cfg(test)]
 mod tests {
-    use clap::Parser;
+    use clap::{CommandFactory, Parser};
 
     use super::*;
     use crate::Cli;
@@ -190,28 +190,33 @@ mod tests {
     }
 
     #[test]
-    fn catalog_has_unique_ids_and_covers_every_cli_operation() {
+    fn catalog_has_unique_ids_and_covers_every_cli_leaf() {
         let mut ids = OPERATION_CATALOG
             .iter()
-            .map(|entry| entry.id)
+            .map(|entry| entry.id.to_owned())
             .collect::<Vec<_>>();
         ids.sort_unstable();
         ids.dedup();
         assert_eq!(ids.len(), OPERATION_CATALOG.len());
 
-        for command in [
-            "init",
-            "migrate",
-            "setup",
-            "sync",
-            "doctor",
-            "mappings validate",
-            "operation list",
-            "schema list",
-            "schema print",
-            "version",
-        ] {
-            assert!(metadata(command).is_some(), "missing operation: {command}");
+        let mut leaves = Vec::new();
+        collect_leaf_commands(&Cli::command(), "", &mut leaves);
+        leaves.sort_unstable();
+        assert_eq!(leaves, ids);
+    }
+
+    fn collect_leaf_commands(command: &clap::Command, prefix: &str, leaves: &mut Vec<String>) {
+        for subcommand in command.get_subcommands() {
+            let path = if prefix.is_empty() {
+                subcommand.get_name().to_owned()
+            } else {
+                format!("{prefix} {}", subcommand.get_name())
+            };
+            if subcommand.get_subcommands().next().is_none() {
+                leaves.push(path);
+            } else {
+                collect_leaf_commands(subcommand, &path, leaves);
+            }
         }
     }
 
