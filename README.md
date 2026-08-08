@@ -93,8 +93,16 @@ ags sync --json
 ags sync --json --event-filter generated,merged
 ags doctor
 ags mappings validate
+ags operation list
+ags operation list --json
+ags schema list --json
+ags schema print cli-output-v1
 ags version
 ```
+
+`operation list` exposes the stable operation IDs and safety metadata used by
+agents and automation. `schema list` and `schema print` expose the bundled
+machine-readable contracts without requiring repository-relative file access.
 
 See [`docs/cli-usage.md`](docs/cli-usage.md) for the full scenario guide,
 including bootstrap, tool switching, drift checks, JSON output, and CI usage.

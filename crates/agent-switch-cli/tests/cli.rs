@@ -264,6 +264,68 @@ fn version_json_reports_build_metadata() {
 }
 
 #[test]
+fn operation_list_exposes_machine_readable_safety_metadata() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ags"))
+        .arg("operation")
+        .arg("list")
+        .arg("--json")
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["schemaVersion"], 1);
+    let operations = report["operations"].as_array().unwrap();
+    let sync = operations
+        .iter()
+        .find(|operation| operation["id"] == "sync")
+        .unwrap();
+    assert_eq!(sync["risk"], "write");
+    assert_eq!(sync["mutates_files"], true);
+    assert_eq!(sync["supports_json"], true);
+
+    let setup = operations
+        .iter()
+        .find(|operation| operation["id"] == "setup")
+        .unwrap();
+    assert_eq!(setup["risk"], "destructive");
+}
+
+#[test]
+fn schema_list_and_print_are_discoverable() {
+    let list = Command::new(env!("CARGO_BIN_EXE_ags"))
+        .arg("schema")
+        .arg("list")
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert_eq!(list.status.code(), Some(0));
+    let report: serde_json::Value = serde_json::from_slice(&list.stdout).unwrap();
+    assert_eq!(report["schemaVersion"], 1);
+    assert_eq!(report["schemas"][0]["name"], "cli-output-v1");
+
+    let printed = Command::new(env!("CARGO_BIN_EXE_ags"))
+        .arg("schema")
+        .arg("print")
+        .arg("cli-output-v1.schema.json")
+        .output()
+        .unwrap();
+    assert_eq!(printed.status.code(), Some(0));
+    let schema: serde_json::Value = serde_json::from_slice(&printed.stdout).unwrap();
+    assert_eq!(
+        schema["$id"],
+        "https://github.com/NeoHsu/agent-switch/schema/cli-output-v1.json"
+    );
+    assert!(
+        schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == "schemaVersion")
+    );
+}
+
+#[test]
 fn json_runtime_errors_use_versioned_stderr_envelope() {
     let temp = tempdir().unwrap();
     fs::write(temp.path().join(".agent-switch.yaml"), "version: 999\n").unwrap();

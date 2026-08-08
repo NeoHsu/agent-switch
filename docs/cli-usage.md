@@ -19,6 +19,8 @@ The command surface is:
   formats.
 - `doctor` is for diagnostics and drift checks.
 - `mappings validate` is for config validation in CI or preflight scripts.
+- `operation list` exposes stable operation IDs and safety metadata for agents.
+- `schema list` and `schema print` expose bundled machine-readable contracts.
 - `version` is for release/build metadata.
 
 ## Global Options
@@ -39,6 +41,30 @@ These options are accepted globally:
 Because these are global clap options, `--config` and `--tool` appear in help
 for commands that do not use them. They are kept global so scripts can pass
 common options consistently before or after subcommands.
+
+## Contract discovery
+
+List the operation catalog in human-readable or machine-readable form:
+
+```bash
+ags operation list
+ags operation list --json
+```
+
+The catalog reports stable IDs, read/write/destructive risk, whether an operation
+mutates repository files, and whether it supports JSON output. Use it to choose
+safe commands instead of inferring side effects from command names.
+
+Discover and print bundled schemas:
+
+```bash
+ags schema list --json
+ags schema print cli-output-v1
+ags schema print cli-output-v1.schema.json
+```
+
+`schema print` emits the exact schema document without adding a response envelope;
+`schema list --json` is itself a versioned CLI response.
 
 Verbose and debug diagnostics are written to stderr, so JSON stdout remains
 machine-readable. Every JSON object response includes additive `schemaVersion: 1`;

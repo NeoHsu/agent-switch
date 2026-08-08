@@ -7,6 +7,7 @@ use clap::{Args, Parser, Subcommand};
 mod commands;
 mod invocation;
 mod operation;
+mod schema;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -51,6 +52,10 @@ enum Commands {
     Doctor(DoctorArgs),
     /// Validate configured symlink/generate/merge mappings.
     Mappings(MappingsCommand),
+    /// Discover stable CLI operation metadata.
+    Operation(OperationCommand),
+    /// Print bundled machine-readable schemas.
+    Schema(SchemaCommand),
     /// Print build version metadata.
     Version(VersionArgs),
 }
@@ -136,6 +141,38 @@ enum MappingsSubcommand {
 struct MappingsCommand {
     #[command(subcommand)]
     command: MappingsSubcommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum OperationSubcommand {
+    /// List stable operations and their safety metadata.
+    List(JsonArg),
+}
+
+#[derive(Debug, Args)]
+struct OperationCommand {
+    #[command(subcommand)]
+    command: OperationSubcommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum SchemaSubcommand {
+    /// List bundled schemas.
+    List(JsonArg),
+    /// Print one bundled schema without an output envelope.
+    Print(SchemaPrintArgs),
+}
+
+#[derive(Debug, Args)]
+struct SchemaCommand {
+    #[command(subcommand)]
+    command: SchemaSubcommand,
+}
+
+#[derive(Debug, Args)]
+struct SchemaPrintArgs {
+    /// Schema name, with an optional `.schema.json` suffix.
+    name: String,
 }
 
 #[derive(Debug, Args)]

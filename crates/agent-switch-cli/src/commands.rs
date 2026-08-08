@@ -1,15 +1,16 @@
 use std::path::Path;
 
 use agent_switch_core::{
-    CommandOutput, TOOL_VERSION, config, diagnostics, fs, init, migrate, output, setup, sync,
-    tool::Tool,
+    CommandOutput, Error, TOOL_VERSION, config, diagnostics, fs, init, migrate, output, setup,
+    sync, tool::Tool,
 };
 use anyhow::Result;
 
 use crate::{
-    Cli, Commands, MappingsSubcommand, MigrateArgs, SetupArgs, SyncArgs,
+    Cli, Commands, MappingsSubcommand, MigrateArgs, OperationSubcommand, SchemaSubcommand,
+    SetupArgs, SyncArgs,
     invocation::{Invocation, Verbosity},
-    operation,
+    operation, schema,
 };
 
 pub(super) fn run(cli: Cli) -> Result<CommandOutput> {
@@ -169,6 +170,28 @@ pub(super) fn run(cli: Cli) -> Result<CommandOutput> {
                     &cfg,
                     tools_ref,
                 );
+                out
+            }
+        },
+        Commands::Operation(command) => match command.command {
+            OperationSubcommand::List(args) => {
+                let mut out = operation_output(args.json)?;
+                add_basic_diagnostics(&mut out, verbosity, "operation list", root);
+                out
+            }
+        },
+        Commands::Schema(command) => match command.command {
+            SchemaSubcommand::List(args) => {
+                let mut out = schema::list(args.json)?;
+                add_basic_diagnostics(&mut out, verbosity, "schema list", root);
+                out
+            }
+            SchemaSubcommand::Print(args) => {
+                let content = schema::content(&args.name)
+                    .ok_or_else(|| Error::Config(format!("unknown schema: {}", args.name)))?;
+                let mut out = CommandOutput::default();
+                out.push(content);
+                add_basic_diagnostics(&mut out, verbosity, "schema print", root);
                 out
             }
         },
@@ -401,6 +424,39 @@ fn display_path(root: &Path, path: &Path) -> String {
     path.strip_prefix(root)
         .map(fs::repo_path)
         .unwrap_or_else(|_| path.display().to_string())
+}
+
+fn operation_output(json_output: bool) -> Result<CommandOutput> {
+    let mut out = CommandOutput::default();
+    if json_output {
+        let operations = operation::OPERATION_CATALOG
+            .iter()
+            .map(|entry| {
+                serde_json::json!({
+                    "id": entry.id,
+                    "risk": entry.risk.as_str(),
+                    "mutates_files": entry.mutates_files,
+                    "supports_json": entry.supports_json,
+                    "description": entry.description,
+                })
+            })
+            .collect::<Vec<_>>();
+        out.push(output::render_json(&serde_json::json!({
+            "operations": operations,
+        }))?);
+    } else {
+        for entry in operation::OPERATION_CATALOG {
+            out.push(format!(
+                "{}\\t{}\\tmutates_files={}\\tjson={}\\t{}",
+                entry.id,
+                entry.risk.as_str(),
+                entry.mutates_files,
+                entry.supports_json,
+                entry.description,
+            ));
+        }
+    }
+    Ok(out)
 }
 
 fn version_output(json_output: bool) -> Result<CommandOutput> {
