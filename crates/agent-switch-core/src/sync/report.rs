@@ -75,10 +75,10 @@ impl SyncReport {
     }
 
     pub(super) fn push(&mut self, event: SyncEvent) -> Result<()> {
-        if let Some(max_events) = self.max_events
-            && self.records.len() >= max_events
-        {
-            bail!("sync event limit exceeded: more than {max_events} events would be emitted");
+        if let Some(max_events) = self.max_events {
+            if self.records.len() >= max_events {
+                bail!("sync event limit exceeded: more than {max_events} events would be emitted");
+            }
         }
         self.records.push(SyncRecord {
             sequence: self.records.len() + 1,
