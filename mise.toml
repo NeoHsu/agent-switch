@@ -1,0 +1,100 @@
+[tools]
+actionlint = "1.7.12"
+python = "3.12.13"
+rust = "stable"
+gitleaks = "8.30.1"
+sccache = "0.17.0"
+zizmor = "1.29.0"
+"cargo:cargo-audit" = "0.22.2"
+"cargo:cargo-deny" = "0.20.2"
+"cargo:cargo-llvm-cov" = "0.8.7"
+"cargo:cargo-machete" = "0.9.2"
+"cargo:cargo-nextest" = "0.9.4"
+
+[tasks."check:fast"]
+description = "Run the fast CLI package check."
+run = "cargo check --locked -p agent-switch-cli"
+
+[tasks.fmt]
+description = "Format all Rust sources."
+run = "cargo fmt --all"
+
+[tasks.lint]
+description = "Check formatting and run the Clippy policy."
+run = [
+  "cargo fmt --all -- --check",
+  "cargo clippy --workspace --all-targets --locked -- -D warnings",
+]
+
+[tasks.test]
+description = "Run every workspace test, including doctests."
+run = [
+  "cargo test --workspace --locked",
+  "cargo test --doc --workspace --locked",
+]
+
+[tasks."test:nextest"]
+description = "Run tests with cargo-nextest and doctests separately."
+run = [
+  "cargo nextest run --workspace --locked --status-level all",
+  "cargo test --doc --workspace --locked",
+]
+
+[tasks.msrv]
+description = "Check all targets with the declared minimum Rust version."
+run = "cargo +1.85.0 check --workspace --all-targets --locked"
+
+[tasks.audit]
+description = "Audit Cargo.lock against the RustSec advisory database."
+run = "cargo audit --deny warnings"
+
+[tasks.deny]
+description = "Check dependency licenses, sources, bans, and advisories."
+run = "cargo deny check"
+
+[tasks."deps:check"]
+description = "Check workspace manifests for unused Cargo dependencies."
+run = "cargo machete"
+
+[tasks."security:secrets"]
+description = "Scan the source tree for committed or uncommitted secrets."
+run = "gitleaks dir --redact --no-banner ."
+
+[tasks.security]
+description = "Run secret, dependency-policy, and advisory checks."
+run = [
+  "gitleaks dir --redact --no-banner .",
+  "cargo deny check",
+  "cargo audit --deny warnings",
+]
+
+[tasks.coverage]
+description = "Enforce workspace line and function coverage floors."
+run = [
+  "cargo llvm-cov --workspace --all-targets --locked --summary-only --fail-under-lines 80 --fail-under-functions 80",
+]
+
+[tasks."workflow:check"]
+description = "Validate GitHub workflow syntax, pins, and security invariants."
+run = "scripts/check-workflows.sh"
+
+[tasks."workflow:security"]
+description = "Audit GitHub Actions workflows with zizmor."
+run = "zizmor --persona pedantic --min-severity medium --min-confidence medium ."
+
+[tasks."check:pr"]
+description = "Run the deterministic local pull-request gate."
+run = [
+  "git diff --check",
+  "cargo machete",
+  "cargo fmt --all -- --check",
+  "cargo clippy --workspace --all-targets --locked -- -D warnings",
+  "cargo nextest run --workspace --locked --status-level all",
+  "cargo test --doc --workspace --locked",
+  "cargo +1.85.0 check --workspace --all-targets --locked",
+  "gitleaks dir --redact --no-banner .",
+  "cargo deny check",
+  "cargo audit --deny warnings",
+  "scripts/check-workflows.sh",
+  "zizmor --persona pedantic --min-severity medium --min-confidence medium .",
+]

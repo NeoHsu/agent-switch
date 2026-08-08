@@ -7,6 +7,8 @@ The binary name is `ags`.
 
 For maintainers, see [`docs/architecture.md`](docs/architecture.md) for the
 workspace layout, sync pipeline, manifest semantics, and extension points.
+See [`docs/development.md`](docs/development.md) for pinned tooling and local
+quality gates.
 For CLI workflows and option semantics, see [`docs/cli-usage.md`](docs/cli-usage.md).
 For canonical `.agents/` file conventions and frontmatter examples, see
 [`docs/canonical-files.md`](docs/canonical-files.md).
@@ -396,15 +398,22 @@ fields are fixed for scripts and CI machines.
 ## Test
 
 ```bash
-cargo test
+mise install
+mise run test:nextest
 ```
 
-CI runs actionlint, `cargo fmt --all --check`, Clippy with warnings denied, an
-MSRV `cargo check --workspace --all-targets --locked`, `cargo audit --deny warnings`,
-and `cargo test --workspace --locked` (including doctests) on Linux, macOS, and
-Windows. Tag pushes matching `v*` repeat verification before building release
-archives. Maintainers can run the Release workflow manually to test every build
-without publishing a GitHub release.
+The local PR gate is:
+
+```bash
+mise run check:pr
+```
+
+CI runs immutable workflow checks, Clippy, `cargo-nextest`, doctests, MSRV,
+coverage, `cargo-machete`, `cargo-deny`, `cargo audit`, `gitleaks`, and
+cross-platform runtime tests on Linux, macOS, and Windows. Tag pushes matching
+`v*` repeat verification before building release archives. Maintainers can run
+the Release workflow manually to test every build without publishing a GitHub
+release.
 
 ## License
 

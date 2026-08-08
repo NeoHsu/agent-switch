@@ -56,7 +56,8 @@ crates/
 │   ├── src/main.rs              clap CLI, exit-code mapping, process lifecycle
 │   ├── src/commands.rs          command dispatch, handlers, diagnostics
 │   ├── src/invocation.rs        resolved root/config/tools, verbosity, mutation lock/journal
-│   ├── src/operation.rs         command effect and output-mode classification
+│   ├── src/operation.rs         command effects and stable safety catalog
+│   ├── src/schema.rs            bundled schema discovery and printing
 │   └── tests/cli.rs             CLI integration tests
 └── agent-switch-core/
     ├── src/lib.rs               public modules, shared Error/ExitCode/CommandOutput
@@ -76,6 +77,10 @@ crates/
 
 schema/
 └── cli-output-v1.json           shared machine-readable response contract
+
+mise.toml                         pinned local quality tools and PR tasks
+deny.toml                         dependency license/source/ban policy
+scripts/check-workflows.sh        workflow syntax and security contract checks
 ```
 
 `agent-switch-cli` 只負責 CLI 介面與 process exit。主要邏輯集中在 `agent-switch-core`，方便測試與未來重用。
@@ -125,11 +130,12 @@ Root discovery 順序：
 
 Config 預設讀取 `.agent-switch.yaml`，也可用 `--config` 指定。
 
-每次 CLI invocation 先由 `operation::classify` 判斷 operation、是否會寫入檔案、
-是否要求 JSON output，再由 `Invocation` 一次解析 root/config/tool filter、verbosity、
-repository lock 與 mutation journal。`commands.rs` 負責 command handlers 與 diagnostics，
-`main.rs` 只負責 parse、render、exit；command handlers 只接收已解析的 context，避免
-各 command 自行重新推導執行目標。
+每次 CLI invocation 先由 `operation::classify` 與 operation catalog 判斷 operation、
+是否會寫入檔案、風險等級與 JSON output，再由 `Invocation` 一次解析
+root/config/tool filter、verbosity、repository lock 與 mutation journal。
+`commands.rs` 負責 command handlers 與 diagnostics，`main.rs` 只負責 parse、render、exit；
+command handlers 只接收已解析的 context，避免各 command 自行重新推導執行目標。
+Agents 可透過 `ags operation list` 取得同一份安全 metadata。
 
 ## Config Schema and Validation
 
@@ -483,11 +489,12 @@ command 會在 dispatch 前取得 `.agent-switch.lock` 的 exclusive lock，並�
 ## Machine-readable Output Contract
 
 `output.rs` 集中處理 JSON response 的 envelope contract；對應的 machine-readable
-schema 維護於 [`schema/cli-output-v1.json`](../schema/cli-output-v1.json)。所有
-JSON object response 都以 additive `schemaVersion: 1` 開始；command-specific fields 維持
-原有命名，讓 automation 能先驗證 schema 再解讀 payload。command report 之前
-發生的 runtime errors 會在 requested JSON mode 下輸出 versioned error object
-到 stderr；diagnostic reports 仍留在 stdout。
+schema 維護於 [`schema/cli-output-v1.json`](../schema/cli-output-v1.json)，並可透過
+`ags schema list` / `ags schema print <NAME>` 從已安裝 binary 取得。所有 JSON object response
+都以 additive `schemaVersion: 1` 開始；command-specific fields 維持原有命名，讓
+automation 能先驗證 schema 再解讀 payload。command report 之前發生的 runtime errors
+會在 requested JSON mode 下輸出 versioned error object 到 stderr；diagnostic reports
+仍留在 stdout。
 
 ## Events, JSON Output, and Exit Codes
 
@@ -533,6 +540,8 @@ Unsupported。
 
 Release workflow 在任何 artifact build 前先執行 actionlint、fmt、clippy、
 完整測試與 `cargo audit`，並拒絕與 Cargo package version 不一致的 tag。
+CI 另外執行 `cargo-nextest`、coverage、`cargo-deny`、`cargo-machete`、
+`gitleaks` 與 workflow security audit。
 Matrix 會建立 static musl Linux x86_64、macOS Apple Silicon/Intel 與 Windows
 x86_64 archive；各 build 只上傳 workflow artifact，最後由單一 publish job
 產生 `SHA256SUMS`、release notes 並發布，避免 concurrent release upload race。
@@ -555,10 +564,16 @@ CI 預期執行：
 ```bash
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo nextest run --workspace --locked
+cargo test --doc --workspace --locked
 cargo check --workspace --all-targets --locked      # MSRV toolchain
+cargo llvm-cov --workspace --all-targets --locked
+cargo machete
+cargo deny check
 cargo audit --deny warnings
+gitleaks dir --redact --no-banner .
 actionlint                                          # GitHub Actions workflows
-cargo test --workspace --locked                     # 含 doctests；Linux/macOS/Windows
+scripts/check-workflows.sh
 ```
 
 ## Adding a New Tool or Format
