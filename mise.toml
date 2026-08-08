@@ -60,6 +60,10 @@ run = "cargo machete"
 description = "Verify exact ags CLI and bundled Skill version lockstep."
 run = "python3 scripts/check-skill-version.py"
 
+[tasks."release:smoke"]
+description = "Self-test release archive and checksum verification."
+run = "python3 scripts/verify-release-artifacts.py --self-test"
+
 [tasks."security:secrets"]
 description = "Scan the source tree for committed or uncommitted secrets."
 run = "gitleaks dir --redact --no-banner ."
@@ -96,6 +100,7 @@ run = [
   "cargo nextest run --workspace --locked --status-level all",
   "cargo test --doc --workspace --locked",
   "python3 scripts/check-skill-version.py",
+  "python3 scripts/verify-release-artifacts.py --self-test",
   "cargo +1.85.0 check --workspace --all-targets --locked",
   "gitleaks dir --redact --no-banner .",
   "cargo deny check",

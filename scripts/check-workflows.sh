@@ -50,6 +50,7 @@ for required in \
   "cargo nextest run --workspace --locked" \
   "cargo test --doc --workspace --locked" \
   "python3 scripts/check-skill-version.py" \
+  "python3 scripts/verify-release-artifacts.py --self-test" \
   "cargo machete" \
   "cargo deny check" \
   "cargo audit --deny warnings" \
@@ -63,6 +64,8 @@ done
 for required in \
   "sha256sum" \
   "cargo audit --deny warnings" \
+  "python3 scripts/verify-release-artifacts.py --version-from-cargo --execute-native" \
+  "actions/attest-build-provenance@" \
   "actions/upload-artifact@"; do
   if ! grep -Fq "$required" .github/workflows/release.yml; then
     echo ".github/workflows/release.yml must contain: $required" >&2

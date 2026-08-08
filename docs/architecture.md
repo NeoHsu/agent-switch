@@ -545,8 +545,10 @@ Release workflow 在任何 artifact build 前先執行 actionlint、fmt、clippy
 CI 另外執行 `cargo-nextest`、coverage、`cargo-deny`、`cargo-machete`、
 `gitleaks` 與 workflow security audit。
 Matrix 會建立 static musl Linux x86_64、macOS Apple Silicon/Intel 與 Windows
-x86_64 archive；各 build 只上傳 workflow artifact，最後由單一 publish job
-產生 `SHA256SUMS`、release notes 並發布，避免 concurrent release upload race。
+x86_64 archive；各 build 只上傳 workflow artifact，bundle job 會以
+`scripts/verify-release-artifacts.py` 檢查 archive contents、safe paths、checksums
+並執行 host-compatible binary，再產生 `SHA256SUMS` 並 attests build provenance。
+最後由單一 publish job 產生 release notes 並發布，避免 concurrent release upload race。
 Tag pattern 為 `v*`；`workflow_dispatch` 可完整測試 build pipeline，但會略過
 publish job。
 

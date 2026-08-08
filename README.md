@@ -382,8 +382,9 @@ See [Install](#install) for platform-specific installation guidance.
 
 Release builds in CI use explicit target triples for static Linux x86_64,
 macOS Apple Silicon and Intel, and Windows x86_64. The tag must match the Cargo
-package version; a single publish job generates checksums and release notes after
-all platform builds succeed.
+package version; a single publish job verifies archive contents/checksums,
+executes the host-compatible binary, attests build provenance, and then
+publishes checksums and release notes after all platform builds succeed.
 
 ## Exit Codes
 

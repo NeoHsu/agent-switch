@@ -22,6 +22,7 @@ mise run check:fast
 | `mise run coverage` | Enforce 80% line and function coverage floors |
 | `mise run deps:check` | Detect unused Cargo dependencies |
 | `mise run skill:version` | Verify CLI and bundled Skill version lockstep |
+| `mise run release:smoke` | Self-test release archive and checksum verification |
 | `mise run security` | Secret, license, source, ban, and advisory checks |
 | `mise run workflow:check` | Validate workflow syntax and immutable pins |
 | `mise run workflow:security` | Audit workflows with zizmor |
@@ -49,7 +50,10 @@ mise run check:pr
 The workflow checker enforces immutable GitHub Action commit pins, disabled
 checkout credentials, job timeouts, cancellation behavior, and the required
 quality/security commands. `deny.toml` rejects unknown registries and Git
-sources, wildcard dependencies, and unapproved licenses.
+sources, wildcard dependencies, and unapproved licenses. Release archives
+are checked for exact contents, checksums, safe paths, and native host
+execution before publication; the bundle is also attested with GitHub build
+provenance.
 
 ## Coverage and security
 
