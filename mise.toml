@@ -56,6 +56,10 @@ run = "cargo deny check"
 description = "Check workspace manifests for unused Cargo dependencies."
 run = "cargo machete"
 
+[tasks."skill:version"]
+description = "Verify exact ags CLI and bundled Skill version lockstep."
+run = "python3 scripts/check-skill-version.py"
+
 [tasks."security:secrets"]
 description = "Scan the source tree for committed or uncommitted secrets."
 run = "gitleaks dir --redact --no-banner ."
@@ -91,6 +95,7 @@ run = [
   "cargo clippy --workspace --all-targets --locked -- -D warnings",
   "cargo nextest run --workspace --locked --status-level all",
   "cargo test --doc --workspace --locked",
+  "python3 scripts/check-skill-version.py",
   "cargo +1.85.0 check --workspace --all-targets --locked",
   "gitleaks dir --redact --no-banner .",
   "cargo deny check",

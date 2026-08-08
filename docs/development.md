@@ -21,6 +21,7 @@ mise run check:fast
 | `mise run msrv` | Check Rust 1.85 compatibility |
 | `mise run coverage` | Enforce 80% line and function coverage floors |
 | `mise run deps:check` | Detect unused Cargo dependencies |
+| `mise run skill:version` | Verify CLI and bundled Skill version lockstep |
 | `mise run security` | Secret, license, source, ban, and advisory checks |
 | `mise run workflow:check` | Validate workflow syntax and immutable pins |
 | `mise run workflow:security` | Audit workflows with zizmor |

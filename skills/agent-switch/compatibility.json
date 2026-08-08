@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "skillName": "agent-switch",
+  "skillVersion": "0.2.1",
+  "cliVersion": "0.2.1",
+  "compatibility": "exact",
+  "releaseTag": "v0.2.1",
+  "requiredCommands": [
+    "ags doctor --skill-version 0.2.1 --json",
+    "ags operation list --json",
+    "ags schema print cli-output-v1"
+  ]
+}

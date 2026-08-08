@@ -264,6 +264,43 @@ fn version_json_reports_build_metadata() {
 }
 
 #[test]
+fn doctor_skill_gate_checks_cli_version_without_loading_repository_config() {
+    let temp = tempdir().unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_ags"))
+        .arg("--root")
+        .arg(temp.path())
+        .arg("doctor")
+        .arg("--skill-version")
+        .arg(env!("CARGO_PKG_VERSION"))
+        .arg("--json")
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["schemaVersion"], 1);
+    assert_eq!(report["skillCompatibility"]["compatible"], true);
+    assert_eq!(
+        report["skillCompatibility"]["cliVersion"],
+        env!("CARGO_PKG_VERSION")
+    );
+    assert!(!temp.path().join(".agent-switch.yaml").exists());
+
+    let mismatch = Command::new(env!("CARGO_BIN_EXE_ags"))
+        .arg("--root")
+        .arg(temp.path())
+        .arg("doctor")
+        .arg("--skill-version")
+        .arg("0.0.0")
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert_eq!(mismatch.status.code(), Some(2));
+    let report: serde_json::Value = serde_json::from_slice(&mismatch.stdout).unwrap();
+    assert_eq!(report["skillCompatibility"]["compatible"], false);
+}
+
+#[test]
 fn operation_list_exposes_machine_readable_safety_metadata() {
     let output = Command::new(env!("CARGO_BIN_EXE_ags"))
         .arg("operation")

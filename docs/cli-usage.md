@@ -17,7 +17,7 @@ The command surface is:
   managed links.
 - `sync` is for converting between canonical `.agents/` files and native tool
   formats.
-- `doctor` is for diagnostics and drift checks.
+- `doctor` is for diagnostics, drift checks, and the fail-closed CLI/Skill version gate.
 - `mappings validate` is for config validation in CI or preflight scripts.
 - `operation list` exposes stable operation IDs and safety metadata for agents.
 - `schema list` and `schema print` expose bundled machine-readable contracts.
@@ -79,6 +79,16 @@ also leave a temporary `.agent-switch.operation.json` journal while running; a l
 mutation reports an interrupted operation if the previous process exited before cleanup.
 `--check`, `doctor`, and mapping validation paths remain read-only and do not create a
 journal.
+
+Verify the exact CLI/Skill pairing without reading repository configuration:
+
+```bash
+ags doctor --skill-version 0.2.1 --json
+```
+
+Continue only when `skillCompatibility.compatible` is `true`. A mismatch exits
+with code `2` and should be fixed by installing the matching Skill and CLI
+release.
 
 ## Choosing `init` vs `migrate`
 

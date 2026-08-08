@@ -33,6 +33,19 @@ install -m 0755 target/release/ags ~/.local/bin/ags
 
 On Windows, copy `target\release\ags.exe` to a directory on `PATH`.
 
+## Agent Skill
+
+Install the bundled Skill so coding agents use the safe `migrate`/`init`,
+`--check`, `--prune`, and JSON workflows:
+
+```bash
+npx skills add . --skill agent-switch
+ags doctor --skill-version 0.2.1 --json
+```
+
+The Skill and CLI are released in exact lockstep. The checked-in
+`skills/agent-switch/compatibility.json` records the pairing contract.
+
 ## Quickstart
 
 For most existing repositories, let coding-agent tools create their native files

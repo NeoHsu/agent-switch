@@ -49,6 +49,7 @@ for required in \
   "cargo check --workspace --all-targets --locked" \
   "cargo nextest run --workspace --locked" \
   "cargo test --doc --workspace --locked" \
+  "python3 scripts/check-skill-version.py" \
   "cargo machete" \
   "cargo deny check" \
   "cargo audit --deny warnings" \

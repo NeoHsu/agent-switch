@@ -138,6 +138,10 @@ pub(super) fn run(cli: Cli) -> Result<CommandOutput> {
             add_sync_diagnostics(&mut out, verbosity, &args, &cfg);
             out
         }
+        Commands::Doctor(args) if args.skill_version.is_some() => skill_compatibility_output(
+            args.skill_version.as_deref().unwrap_or_default(),
+            args.json,
+        )?,
         Commands::Doctor(args) => {
             let path = invocation.config_path();
             let cfg = if path.exists() || config_path.is_some() {
@@ -424,6 +428,40 @@ fn display_path(root: &Path, path: &Path) -> String {
     path.strip_prefix(root)
         .map(fs::repo_path)
         .unwrap_or_else(|_| path.display().to_string())
+}
+
+fn skill_compatibility_output(skill_version: &str, json_output: bool) -> Result<CommandOutput> {
+    let compatible = skill_version == TOOL_VERSION;
+    let mut out = CommandOutput {
+        exit: (!compatible).then_some(agent_switch_core::ExitCode::Config),
+        ..CommandOutput::default()
+    };
+    if json_output {
+        out.push(output::render_json(&serde_json::json!({
+            "skillCompatibility": {
+                "compatible": compatible,
+                "cliVersion": TOOL_VERSION,
+                "skillVersion": skill_version,
+                "targetVersion": TOOL_VERSION,
+                "recommendedAction": if compatible {
+                    "proceed"
+                } else {
+                    "install the matching agent-switch Skill"
+                },
+                "updateCommand": serde_json::Value::Null,
+            }
+        }))?);
+    } else {
+        out.push(format!("compatible: {compatible}"));
+        out.push(format!("cli version: {TOOL_VERSION}"));
+        out.push(format!("skill version: {skill_version}"));
+        if !compatible {
+            out.push(format!(
+                "hint: install the Skill matching agent-switch {TOOL_VERSION}"
+            ));
+        }
+    }
+    Ok(out)
 }
 
 fn operation_output(json_output: bool) -> Result<CommandOutput> {

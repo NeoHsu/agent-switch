@@ -129,6 +129,9 @@ struct DoctorArgs {
     /// Emit diagnostics as JSON.
     #[arg(long)]
     json: bool,
+    /// Fail closed unless the installed CLI matches this Skill version.
+    #[arg(long)]
+    skill_version: Option<String>,
 }
 
 #[derive(Debug, Subcommand)]
