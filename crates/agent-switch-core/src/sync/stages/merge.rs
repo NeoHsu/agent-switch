@@ -41,7 +41,7 @@ fn merge_configs(ctx: &SyncContext, report: &mut SyncReport) -> Result<bool> {
             changed = true;
             report.push(SyncEvent::Merged {
                 path: repo_path(&spec.to),
-            });
+            })?;
         }
     }
 

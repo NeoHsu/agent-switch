@@ -403,7 +403,11 @@ output.
 ```bash
 ags sync --json --event-filter imported,generated
 ags sync --check --json --event-filter drift,synced_no_changes
+ags sync --check --export-only --json --max-files 500 --max-source-bytes 1048576 --max-output-bytes 1048576 --max-events 1000
 ```
+
+The `--max-*` options bound large-repository checks. Output and event limits are
+check-only safeguards; file and source-byte limits also bound plan construction.
 
 When `--json` is used, events are emitted in a deterministic order and payload
 fields are fixed for scripts and CI machines.

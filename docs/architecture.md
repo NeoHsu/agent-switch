@@ -371,6 +371,8 @@ Sync options：
 - `--export-only`：跳過 import，只跑 export/remove stale/link copy/merge。
 - `--json`：輸出固定 schema 的 machine-readable report。
 - `--event-filter`：過濾 text/JSON event output。
+- `--max-files` / `--max-source-bytes`：限制 plan 掃描的 Markdown 工作量。
+- `--max-output-bytes` / `--max-events`：僅允許於 `--check`，避免限制失敗中斷 mutation。
 
 ## SyncPlan and Manifest
 

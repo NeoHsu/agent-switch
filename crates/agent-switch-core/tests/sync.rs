@@ -271,6 +271,10 @@ fn sync_can_output_machine_readable_json() {
     assert_eq!(report["exit_code"].as_i64().unwrap(), 0);
     assert!(report["options"]["json"].as_bool().unwrap());
     assert!(!report["options"]["reset_manifest"].as_bool().unwrap());
+    assert!(report["options"]["max_files"].is_null());
+    assert!(report["options"]["max_source_bytes"].is_null());
+    assert!(report["options"]["max_output_bytes"].is_null());
+    assert!(report["options"]["max_events"].is_null());
     assert!(!report["events"].as_array().unwrap().is_empty());
     assert_eq!(
         report["summary"]["total_events"].as_u64().unwrap() as usize,
@@ -318,6 +322,53 @@ fn sync_can_output_machine_readable_json() {
             .iter()
             .any(|e| e["event"] == json!("synced_no_changes"))
     );
+}
+
+#[test]
+fn sync_limits_bound_plan_sources_outputs_and_events() {
+    let limits = [
+        (
+            SyncOptions {
+                max_files: Some(1),
+                ..Default::default()
+            },
+            "sync generated-file limit exceeded",
+        ),
+        (
+            SyncOptions {
+                max_source_bytes: Some(1),
+                ..Default::default()
+            },
+            "sync source-byte limit exceeded",
+        ),
+        (
+            SyncOptions {
+                check: true,
+                max_output_bytes: Some(1),
+                ..Default::default()
+            },
+            "sync generated-output limit exceeded",
+        ),
+        (
+            SyncOptions {
+                check: true,
+                max_events: Some(0),
+                ..Default::default()
+            },
+            "sync event limit exceeded",
+        ),
+    ];
+
+    for (options, expected) in limits {
+        let temp = tempdir().unwrap();
+        let root = temp.path();
+        let cfg = fixture(root);
+        let error = sync::run(root, &cfg, None, options).unwrap_err();
+        assert!(
+            format!("{error:#}").contains(expected),
+            "error was: {error:#}"
+        );
+    }
 }
 
 #[test]

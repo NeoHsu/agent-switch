@@ -94,7 +94,7 @@ fn import_changed(
             dest,
             src: repo_path(&src_rel),
             conflict: src_changed,
-        });
+        })?;
     }
 
     Ok(changed)

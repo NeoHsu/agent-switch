@@ -3,6 +3,7 @@ use std::io;
 use anyhow::{Context, Result};
 
 use crate::{
+    Error,
     fs::{read_text, repo_path, write_if_changed},
     manifest::{self, GeneratedEntry},
 };
@@ -48,6 +49,16 @@ fn export_jobs(
             .format
             .export(&source)
             .with_context(|| format!("failed to export {}", repo_path(&job.src_rel)))?;
+        if let Some(max_output_bytes) = ctx.max_output_bytes
+            && generated.len() as u64 > max_output_bytes
+        {
+            return Err(Error::Config(format!(
+                "sync generated-output limit exceeded for {}: {} bytes is greater than the {max_output_bytes}-byte limit",
+                repo_path(&job.dest_rel),
+                generated.len()
+            ))
+            .into());
+        }
         let generated_hash = manifest::sha256_text(&generated);
         let src_hash = manifest::sha256_text(&source);
         let dest_key = repo_path(&job.dest_rel);
@@ -65,7 +76,7 @@ fn export_jobs(
             changed = true;
             report.push(SyncEvent::Generated {
                 dest: dest_key.clone(),
-            });
+            })?;
         }
 
         if !ctx.check {

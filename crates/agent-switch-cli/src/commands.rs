@@ -124,6 +124,10 @@ pub(super) fn run(cli: Cli) -> Result<CommandOutput> {
                     reset_manifest: args.reset_manifest,
                     json: args.json,
                     event_filter,
+                    max_files: args.max_files,
+                    max_source_bytes: args.max_source_bytes,
+                    max_output_bytes: args.max_output_bytes,
+                    max_events: args.max_events,
                 },
             )?;
             add_config_diagnostics(
@@ -335,6 +339,10 @@ fn add_sync_diagnostics(
         sync_stage_labels(args, cfg).join(", ")
     ));
     out.diagnostic(format!("verbose: reset manifest: {}", args.reset_manifest));
+    out.diagnostic(format!(
+        "verbose: limits: files={:?}, source_bytes={:?}, output_bytes={:?}, events={:?}",
+        args.max_files, args.max_source_bytes, args.max_output_bytes, args.max_events
+    ));
     if verbosity.debug {
         out.diagnostic(format!("debug: import only: {}", args.import_only));
         out.diagnostic(format!("debug: export only: {}", args.export_only));

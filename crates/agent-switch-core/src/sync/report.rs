@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::Serialize;
 
 use crate::{CommandOutput, ExitCode, output};
@@ -13,6 +13,7 @@ use super::{
 #[derive(Debug, Default)]
 pub(super) struct SyncReport {
     records: Vec<SyncRecord>,
+    max_events: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -42,6 +43,10 @@ struct SyncJsonOptions {
     reset_manifest: bool,
     json: bool,
     event_filter: Option<Vec<String>>,
+    max_files: Option<usize>,
+    max_source_bytes: Option<u64>,
+    max_output_bytes: Option<u64>,
+    max_events: Option<usize>,
 }
 
 #[derive(Debug, Serialize)]
@@ -62,11 +67,24 @@ struct SyncJsonEvent {
 }
 
 impl SyncReport {
-    pub(super) fn push(&mut self, event: SyncEvent) {
+    pub(super) fn with_max_events(max_events: Option<usize>) -> Self {
+        Self {
+            records: Vec::new(),
+            max_events,
+        }
+    }
+
+    pub(super) fn push(&mut self, event: SyncEvent) -> Result<()> {
+        if let Some(max_events) = self.max_events
+            && self.records.len() >= max_events
+        {
+            bail!("sync event limit exceeded: more than {max_events} events would be emitted");
+        }
         self.records.push(SyncRecord {
             sequence: self.records.len() + 1,
             event,
         });
+        Ok(())
     }
 
     pub(super) fn is_empty(&self) -> bool {
@@ -157,6 +175,10 @@ impl SyncReport {
                 .event_filter
                 .as_ref()
                 .map(|filter| filter.iter().map(|kind| kind.to_string()).collect()),
+            max_files: opts.max_files,
+            max_source_bytes: opts.max_source_bytes,
+            max_output_bytes: opts.max_output_bytes,
+            max_events: opts.max_events,
         };
 
         let payload = SyncOutputPayload {

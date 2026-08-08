@@ -8,6 +8,7 @@ pub(super) struct SyncContext<'a> {
     pub cfg: &'a Config,
     pub tools: Option<&'a [Tool]>,
     pub check: bool,
+    pub max_output_bytes: Option<u64>,
 }
 
 impl<'a> SyncContext<'a> {
@@ -16,12 +17,14 @@ impl<'a> SyncContext<'a> {
         cfg: &'a Config,
         tools: Option<&'a [Tool]>,
         check: bool,
+        max_output_bytes: Option<u64>,
     ) -> Self {
         Self {
             root,
             cfg,
             tools,
             check,
+            max_output_bytes,
         }
     }
 

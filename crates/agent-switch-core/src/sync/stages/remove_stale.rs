@@ -54,7 +54,7 @@ fn remove_stale(
             manifest.generated.remove(&key);
         }
 
-        report.push(SyncEvent::Removed { path: key });
+        report.push(SyncEvent::Removed { path: key })?;
     }
 
     Ok(changed)

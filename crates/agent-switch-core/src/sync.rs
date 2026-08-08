@@ -37,6 +37,10 @@ pub struct SyncOptions {
     pub reset_manifest: bool,
     pub json: bool,
     pub event_filter: Option<Vec<event::SyncEventKind>>,
+    pub max_files: Option<usize>,
+    pub max_source_bytes: Option<u64>,
+    pub max_output_bytes: Option<u64>,
+    pub max_events: Option<usize>,
 }
 
 pub fn parse_event_filter(values: &[String]) -> Result<Vec<event::SyncEventKind>> {
@@ -52,6 +56,11 @@ pub fn run(
     if opts.import_only && opts.export_only {
         return Err(
             Error::Config("--import-only and --export-only are mutually exclusive".into()).into(),
+        );
+    }
+    if !opts.check && (opts.max_output_bytes.is_some() || opts.max_events.is_some()) {
+        return Err(
+            Error::Config("--max-output-bytes and --max-events require --check".into()).into(),
         );
     }
     if !opts.import_only && !opts.export_only {
@@ -70,17 +79,25 @@ pub fn run(
         manifest::load(&manifest_path)
             .with_context(|| format!("failed to read manifest {manifest_path_display}"))?
     };
-    let plan = SyncPlan::build(root, cfg, tools)?;
-    let ctx = SyncContext::new(root, cfg, tools, opts.check);
+    let plan = SyncPlan::build(
+        root,
+        cfg,
+        tools,
+        plan::PlanLimits {
+            max_files: opts.max_files,
+            max_source_bytes: opts.max_source_bytes,
+        },
+    )?;
+    let ctx = SyncContext::new(root, cfg, tools, opts.check, opts.max_output_bytes);
 
-    let mut report = SyncReport::default();
+    let mut report = SyncReport::with_max_events(opts.max_events);
     let mut changed = opts.reset_manifest;
     if opts.reset_manifest {
         report.push(SyncEvent::Warning {
             message: format!(
                 "reset manifest: rebuilding {manifest_path_display} from current files"
             ),
-        });
+        })?;
     }
 
     let stages: [&dyn SyncStage; 5] = [
@@ -105,9 +122,9 @@ pub fn run(
 
     if opts.check {
         if changed {
-            report.push(SyncEvent::Drift);
+            report.push(SyncEvent::Drift)?;
         } else {
-            report.push(SyncEvent::SyncedNoChanges);
+            report.push(SyncEvent::SyncedNoChanges)?;
         }
 
         if opts.json {
@@ -124,7 +141,7 @@ pub fn run(
 
     manifest::save(&manifest_path, &mut manifest)?;
     if !changed && report.is_empty() {
-        report.push(SyncEvent::SyncedNoChanges);
+        report.push(SyncEvent::SyncedNoChanges)?;
     }
 
     if opts.json {

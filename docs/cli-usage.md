@@ -326,6 +326,16 @@ ags sync --event-filter generated,merged
 ags sync --json --event-filter drift,synced_no_changes
 ```
 
+Bound read-only drift checks when running against a large repository:
+
+```bash
+ags sync --check --export-only --json --max-files 500 --max-source-bytes 1048576 --max-output-bytes 1048576 --max-events 1000
+```
+
+`--max-files` and `--max-source-bytes` bound plan construction. The output and
+event limits are check-only safeguards so a failed budget cannot interrupt a
+mutating sync halfway through its stages.
+
 `--import-only` and `--export-only` are mutually exclusive. `--check` can be
 combined with either one to test one direction without writing files.
 

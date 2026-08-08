@@ -20,6 +20,12 @@ pub(crate) struct Job {
     pub(crate) dest_rel: PathBuf,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct PlanLimits {
+    pub(super) max_files: Option<usize>,
+    pub(super) max_source_bytes: Option<u64>,
+}
+
 #[derive(Debug)]
 pub(super) struct SyncPlan {
     pub(super) specs: Vec<GenerateSpec>,
@@ -28,9 +34,14 @@ pub(super) struct SyncPlan {
 }
 
 impl SyncPlan {
-    pub(super) fn build(root: &Path, cfg: &Config, tools: Option<&[Tool]>) -> Result<Self> {
+    pub(super) fn build(
+        root: &Path,
+        cfg: &Config,
+        tools: Option<&[Tool]>,
+        limits: PlanLimits,
+    ) -> Result<Self> {
         let specs = selected_specs(cfg, tools);
-        let jobs = build_jobs(root, &specs)?;
+        let jobs = build_jobs(root, &specs, limits)?;
         let job_dests = jobs
             .iter()
             .map(|job| repo_path(&job.dest_rel))
@@ -61,11 +72,13 @@ fn selected_specs(cfg: &Config, tools: Option<&[Tool]>) -> Vec<GenerateSpec> {
 /// Compute the generated outputs the given specs would produce. Shared with
 /// `setup --prune`, which needs the output list for unselected specs.
 pub(crate) fn planned_outputs(root: &Path, specs: &[GenerateSpec]) -> Result<Vec<Job>> {
-    build_jobs(root, specs)
+    build_jobs(root, specs, PlanLimits::default())
 }
 
-fn build_jobs(root: &Path, specs: &[GenerateSpec]) -> Result<Vec<Job>> {
+fn build_jobs(root: &Path, specs: &[GenerateSpec], limits: PlanLimits) -> Result<Vec<Job>> {
     let mut jobs = Vec::new();
+    let mut source_files = 0usize;
+    let mut source_bytes = 0u64;
     let mut dest_sources = BTreeMap::<String, PathBuf>::new();
 
     for spec in specs {
@@ -91,6 +104,27 @@ fn build_jobs(root: &Path, specs: &[GenerateSpec]) -> Result<Vec<Job>> {
             if !spec.recursive && rel_to_from.components().count() > 1 {
                 continue;
             }
+
+            source_files += 1;
+            if let Some(max_files) = limits.max_files {
+                if source_files > max_files {
+                    return Err(Error::Config(format!(
+                        "sync generated-file limit exceeded: more than {max_files} Markdown sources would be processed"
+                    ))
+                    .into());
+                }
+            }
+
+            source_bytes = source_bytes.saturating_add(entry.metadata()?.len());
+            if let Some(max_source_bytes) = limits.max_source_bytes {
+                if source_bytes > max_source_bytes {
+                    return Err(Error::Config(format!(
+                        "sync source-byte limit exceeded: more than {max_source_bytes} bytes would be read"
+                    ))
+                    .into());
+                }
+            }
+
             let rel_no_ext = rel_to_from.with_extension("");
             let file_name = rel_no_ext
                 .file_name()

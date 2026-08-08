@@ -87,7 +87,7 @@ fn sync_link_copy(
                 "{} is an unrestored git symlink placeholder; run `ags setup`",
                 repo_path(link_rel)
             ),
-        });
+        })?;
         return Ok(false);
     }
 
@@ -110,7 +110,7 @@ fn sync_link_copy(
         report.push(SyncEvent::Copied {
             from: repo_path(target_rel),
             to: repo_path(link_rel),
-        });
+        })?;
         return Ok(true);
     }
 
@@ -137,7 +137,7 @@ fn sync_link_copy(
                     link_key,
                     repo_path(target_rel)
                 ),
-            });
+            })?;
         }
         return Ok(false);
     };
@@ -150,7 +150,7 @@ fn sync_link_copy(
         report.push(SyncEvent::Copied {
             from: repo_path(link_rel),
             to: repo_path(target_rel),
-        });
+        })?;
         return Ok(true);
     } else if link_bytes != target_bytes {
         let target_hash = manifest::sha256_bytes(&target_bytes);
@@ -161,7 +161,7 @@ fn sync_link_copy(
         report.push(SyncEvent::Copied {
             from: repo_path(target_rel),
             to: repo_path(link_rel),
-        });
+        })?;
         return Ok(true);
     }
 

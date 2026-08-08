@@ -86,13 +86,16 @@ ags --root <repo> mappings validate --json
 - Do not delete `.agent-switch.lock`, `.agent-switch.operation.json`, or the
   sync manifest to bypass a safety check. Use the recovery hint from `doctor` or
   `sync --reset-manifest` when appropriate.
+- For large repositories, bound read-only checks with `--max-files`,
+  `--max-source-bytes`, `--max-output-bytes`, and `--max-events`.
+  `--max-output-bytes` and `--max-events` require `--check`.
 
 ## Automation output
 
 Use JSON output when another tool will consume the result:
 
 ```bash
-ags --root <repo> sync --check --export-only --json
+ags --root <repo> sync --check --export-only --json --max-files 500 --max-source-bytes 1048576 --max-output-bytes 1048576 --max-events 1000
 ags --root <repo> doctor --json
 ags operation list --json
 ags schema print cli-output-v1
