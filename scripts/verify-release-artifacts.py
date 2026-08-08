@@ -52,6 +52,24 @@ def fail(message: str) -> NoReturn:
     raise ValueError(message)
 
 
+def checked_archive_path(root: Path, name: str) -> Path:
+    if name not in ARCHIVES:
+        fail(f"unknown release archive: {name}")
+    relative = Path(name)
+    if relative.is_absolute() or relative.name != name or ".." in relative.parts:
+        fail(f"unsafe release archive path: {name}")
+    return root / relative
+
+
+def checked_member_name(name: str) -> str:
+    if name not in {"ags", "ags.exe"}:
+        fail(f"unsafe archive member path: {name}")
+    relative = Path(name)
+    if relative.is_absolute() or relative.name != name or ".." in relative.parts:
+        fail(f"unsafe archive member path: {name}")
+    return name
+
+
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -91,7 +109,7 @@ def checksum_manifest(root: Path) -> None:
             f"expected {sorted(ARCHIVES)}, found {sorted(expected)}"
         )
     for name in ARCHIVES:
-        path = root / name
+        path = checked_archive_path(root, name)
         if not path.is_file():
             fail(f"release archive is missing: {name}")
         actual = sha256(path)
@@ -100,6 +118,7 @@ def checksum_manifest(root: Path) -> None:
 
 
 def verify_tar(path: Path, expected_member: str) -> None:
+    expected_member = checked_member_name(expected_member)
     try:
         with tarfile.open(path, "r:gz") as archive:
             members = archive.getmembers()
@@ -117,6 +136,7 @@ def verify_tar(path: Path, expected_member: str) -> None:
 
 
 def verify_zip(path: Path, expected_member: str) -> None:
+    expected_member = checked_member_name(expected_member)
     try:
         with zipfile.ZipFile(path) as archive:
             names = archive.namelist()
@@ -134,7 +154,7 @@ def verify_zip(path: Path, expected_member: str) -> None:
 def verify_archives(root: Path, version: str | None, execute_native: bool = False) -> None:
     checksum_manifest(root)
     for name, member in ARCHIVES.items():
-        path = root / name
+        path = checked_archive_path(root, name)
         if path.suffix == ".zip":
             verify_zip(path, member)
         else:
@@ -167,14 +187,15 @@ def execute_native_archive(root: Path, version: str | None) -> None:
         print("skipped native archive execution: unsupported host")
         return
 
-    expected_member = ARCHIVES[archive_name]
+    archive_path = checked_archive_path(root, archive_name)
+    expected_member = checked_member_name(ARCHIVES[archive_name])
     with tempfile.TemporaryDirectory(prefix="ags-release-verify-") as directory:
         extracted = Path(directory) / expected_member
         if archive_name.endswith(".zip"):
-            with zipfile.ZipFile(root / archive_name) as archive:
+            with zipfile.ZipFile(archive_path) as archive:
                 extracted.write_bytes(archive.read(expected_member))
         else:
-            with tarfile.open(root / archive_name, "r:gz") as archive:
+            with tarfile.open(archive_path, "r:gz") as archive:
                 data = archive.extractfile(expected_member)
                 if data is None:
                     fail(f"could not extract {expected_member} from {archive_name}")
